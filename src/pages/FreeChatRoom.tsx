@@ -72,43 +72,6 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   );
 }
 
-// ── 在线人数管理（localStorage + Supabase） ─────────────────────
-function getOnlineUsers(roomId: string): Array<{ id: string; ts: number }> {
-  try {
-    const raw = localStorage.getItem(`toptalk_online_${roomId}`);
-    if (!raw) return [];
-    const users: Array<{ id: string; ts: number }> = JSON.parse(raw);
-    // 移除超过2分钟未活跃的用户
-    const alive = users.filter(u => Date.now() - u.ts < 120000);
-    localStorage.setItem(`toptalk_online_${roomId}`, JSON.stringify(alive));
-    return alive;
-  } catch { return []; }
-}
-
-function addOnlineUser(roomId: string, userId: string) {
-  try {
-    const users = getOnlineUsers(roomId).filter(u => u.id !== userId);
-    users.push({ id: userId, ts: Date.now() });
-    localStorage.setItem(`toptalk_online_${roomId}`, JSON.stringify(users));
-  } catch {}
-}
-
-function removeOnlineUser(roomId: string, userId: string) {
-  try {
-    const users = getOnlineUsers(roomId).filter(u => u.id !== userId);
-    localStorage.setItem(`toptalk_online_${roomId}`, JSON.stringify(users));
-  } catch {}
-}
-
-function Heartbeat({ roomId, userId }: { roomId: string; userId: string }) {
-  useEffect(() => {
-    addOnlineUser(roomId, userId);
-    const id = setInterval(() => addOnlineUser(roomId, userId), 30000);
-    return () => { removeOnlineUser(roomId, userId); clearInterval(id); };
-  }, [roomId, userId]);
-  return null;
-}
-
 export default function FreeChatRoom() {
   const [searchParams] = useSearchParams();
   const roomId = searchParams.get('roomId') || '——';
@@ -154,37 +117,39 @@ export default function FreeChatRoom() {
     } catch {}
   }, []);
 
-  // ── Supabase Realtime 订阅 ──────────────────────────
+  // ── Supabase Realtime：广播消息 + Presence 在线人数（跨设备一致） ──
   useEffect(() => {
+    const uid = userIdRef.current;
     const channel = supabase.channel(`free_room_${roomId}`, {
-      config: { broadcast: { self: false } },
+      config: {
+        broadcast: { self: false },
+        presence: { key: uid },
+      },
     });
     channelRef.current = channel;
+
+    const updatePresenceCount = () => {
+      try {
+        const state = channel.presenceState();
+        const n = Object.keys(state || {}).length;
+        setOnlineCount(n > 0 ? n : 1);
+      } catch {
+        setOnlineCount(1);
+      }
+    };
+
+    channel.on('presence', { event: 'sync' }, updatePresenceCount);
+    channel.on('presence', { event: 'join' }, updatePresenceCount);
+    channel.on('presence', { event: 'leave' }, updatePresenceCount);
 
     // 监听新消息
     channel.on('broadcast', { event: 'new_message' }, ({ payload }) => {
       const msg = payload as Message;
-      // 自己的消息不重复添加（本地已立即显示）
       if (msg.sender === userIdRef.current) return;
       setMessages(prev => {
         if (prev.some(m => m.id === msg.id)) return prev;
         return [...prev, msg];
       });
-    });
-
-    // 监听加入
-    channel.on('broadcast', { event: 'user_joined' }, ({ payload }) => {
-      const { userId: jid } = payload as { userId: string };
-      if (jid === userIdRef.current) return;
-      addOnlineUser(roomId, jid);
-      setOnlineCount(getOnlineUsers(roomId).length);
-    });
-
-    // 监听离开
-    channel.on('broadcast', { event: 'user_left' }, ({ payload }) => {
-      const { userId: lid } = payload as { userId: string };
-      removeOnlineUser(roomId, lid);
-      setOnlineCount(Math.max(1, getOnlineUsers(roomId).length));
     });
 
     // 监听解散
@@ -194,23 +159,20 @@ export default function FreeChatRoom() {
     });
 
     channel.subscribe(async (status) => {
-      if (status === 'SUBSCRIBED') {
-        // 加入房间：更新在线列表 + 广播给其他人
-        addOnlineUser(roomId, userIdRef.current);
-        setOnlineCount(getOnlineUsers(roomId).length);
-        await channel.track({ userId: userIdRef.current, roomId });
-        channel.send({
-          type: 'broadcast',
-          event: 'user_joined',
-          payload: { userId: userIdRef.current, nickname: nicknameRef.current },
-        });
-      }
+      if (status !== 'SUBSCRIBED') return;
+      await channel.track({
+        userId: uid,
+        roomId,
+        online_at: new Date().toISOString(),
+      });
+      updatePresenceCount();
     });
 
     return () => {
-      channel.send({ type: 'broadcast', event: 'user_left', payload: { userId: userIdRef.current } });
-      removeOnlineUser(roomId, userIdRef.current);
-      channel.unsubscribe();
+      channelRef.current = null;
+      try {
+        channel.unsubscribe();
+      } catch { /* ignore */ }
     };
   }, [roomId]);
 
@@ -343,7 +305,6 @@ export default function FreeChatRoom() {
       leftRooms[roomId] = new Date().toISOString();
       localStorage.setItem('toptalk_left', JSON.stringify(leftRooms));
     } catch {}
-    removeOnlineUser(roomId, userIdRef.current);
     channelRef.current?.send({ type: 'broadcast', event: 'user_left', payload: { userId: userIdRef.current } });
     setTimeout(() => { window.location.href = '/rooms'; }, 2000);
   };
@@ -354,9 +315,6 @@ export default function FreeChatRoom() {
 
   return (
     <div className="min-h-screen bg-[#050d1a] text-white flex flex-col">
-
-      {/* 在线人数心跳（后台运行） */}
-      <Heartbeat roomId={roomId} userId={userIdRef.current} />
 
       {/* 导航栏（fixed，永远在最上层） */}
       <Navbar />

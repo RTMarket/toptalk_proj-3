@@ -130,83 +130,60 @@ export default function PremiumChatRoom() {
 
   // ── Supabase Realtime 订阅 ──────────────────────────
   useEffect(() => {
+    const uid = userIdRef.current;
     const channel = supabase.channel(`premium_room_${roomId}`, {
-      config: { broadcast: { self: false } },
+      config: {
+        broadcast: { self: false },
+        presence: { key: uid },
+      },
     });
+    channelRef.current = channel;
 
-    // 监听新消息广播
+    const updatePresenceCount = () => {
+      try {
+        const state = channel.presenceState();
+        const count = Object.keys(state || {}).length;
+        setOnlineCount(count > 0 ? count : 1);
+      } catch {
+        setOnlineCount(1);
+      }
+    };
+
+    // 监听新消息广播（己方已通过 self:false 过滤；文本 sender 为对方 userId，文件为 'me'）
     channel.on('broadcast', { event: 'new_message' }, ({ payload }) => {
       try {
         const msg = payload as Message;
-        if (msg?.sender && msg.sender !== userIdRef.current) {
-          setMessages(prev => {
-            if (prev.some(m => m.id === msg.id)) return prev;
-            return [...prev, msg];
-          });
-        }
-      } catch { /* ignore broadcast error */ }
+        if (!msg?.id || msg.sender === userIdRef.current) return;
+        setMessages(prev => {
+          if (prev.some(m => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
+      } catch { /* ignore */ }
     });
 
-    // 监听用户加入/离开
-    channel.on('broadcast', { event: 'user_joined' }, () => {
-      setOnlineCount(prev => Math.max(1, prev + 1));
-    });
-    channel.on('broadcast', { event: 'user_left' }, () => {
-      setOnlineCount(prev => Math.max(1, prev - 1));
-    });
     channel.on('broadcast', { event: 'room_dissolved' }, () => {
       setOverlayType('dissolving');
       setTimeout(() => window.location.replace('/rooms-premium'), 2100);
     });
 
-    // 延迟 100ms 再 subscribe，确保组件先渲染完成
-    const timer = setTimeout(() => {
-      try {
-        channel.subscribe((status) => {
-          try {
-            if (status === 'SUBSCRIBED') {
-              const savedChannel = channel;
-              const savedUserId = userIdRef.current;
-              savedChannel.track({ userId: savedUserId, roomId }).then(() => {
-                savedChannel.send({ type: 'broadcast', event: 'user_joined', payload: { userId: savedUserId } });
-              }).catch(() => { /* ignore */ });
-            }
-          } catch { /* ignore subscribe callback error */ }
-        });
-      } catch { /* ignore channel error */ }
-    }, 100);
-    return () => clearTimeout(timer);
+    channel.on('presence', { event: 'sync' }, updatePresenceCount);
+    channel.on('presence', { event: 'join' }, updatePresenceCount);
+    channel.on('presence', { event: 'leave' }, updatePresenceCount);
 
-    // 监听 presence sync（获取当前房间所有在线用户）
-    channel.on('presence', { event: 'sync' }, () => {
-      try {
-        const state = channel.presenceState();
-        const count = Object.keys(state || {}).length;
-        setOnlineCount(count > 0 ? count : 1);
-      } catch { setOnlineCount(1); }
+    channel.subscribe(status => {
+      if (status !== 'SUBSCRIBED') return;
+      channel
+        .track({ userId: uid, roomId, online_at: new Date().toISOString() })
+        .then(() => updatePresenceCount())
+        .catch(() => updatePresenceCount());
     });
-
-    // 监听用户加入（presence join）
-    channel.on('presence', { event: 'join' }, ({ newPresences }) => {
-      try { setOnlineCount(prev => Math.max(1, prev + (newPresences?.length || 1))); } catch { /* ignore */ }
-    });
-
-    // 监听用户离开（presence leave）
-    channel.on('presence', { event: 'leave' }, ({ leftPresences }) => {
-      try { setOnlineCount(prev => Math.max(1, prev - (leftPresences?.length || 1))); } catch { /* ignore */ }
-    });
-
-    // 监听其他用户的消息广播
-    channelRef.current = channel;
 
     return () => {
       const savedChannel = channelRef.current;
-      const savedUserId = userIdRef.current;
-      clearTimeout(timer);
-      try { savedChannel?.unsubscribe(); } catch { /* ignore */ }
-      setTimeout(() => {
-        try { savedChannel?.send({ type: 'broadcast', event: 'user_left', payload: { userId: savedUserId } }); } catch { /* ignore */ }
-      }, 500);
+      channelRef.current = null;
+      try {
+        savedChannel?.unsubscribe();
+      } catch { /* ignore */ }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
