@@ -255,6 +255,128 @@ async function handleApprove(req: Request) {
   return json({ success: true, status: newStatus })
 }
 
+// ── POST /delete: 管理员删除订单（硬删除）────────────────────────
+async function handleDelete(req: Request) {
+  const admin = requireAdmin(req)
+  if (!admin.ok) return admin.res
+  const { orderId } = await req.json().catch(() => ({}))
+  if (!orderId) return json({ success: false, message: '缺少参数' }, 400)
+
+  // 先读一遍确保存在（并返回被删订单号供前端提示）
+  const { data: row, error: fetchErr } = await supabaseAdmin
+    .from('payment_orders')
+    .select('id, order_no')
+    .eq('id', orderId)
+    .maybeSingle()
+  if (fetchErr) return json({ success: false, message: fetchErr.message }, 500)
+  if (!row) return json({ success: false, message: '订单不存在' }, 404)
+
+  const { error } = await supabaseAdmin.from('payment_orders').delete().eq('id', orderId)
+  if (error) return json({ success: false, message: error.message }, 500)
+  return json({ success: true, deleted: { id: row.id, order_no: row.order_no } })
+}
+
+// ── GET /user-usage: 管理员查看用户使用情况（按邮箱）───────────────
+async function handleUserUsage(req: Request) {
+  const admin = requireAdmin(req)
+  if (!admin.ok) return admin.res
+  const url = new URL(req.url)
+  const email = (url.searchParams.get('email') || '').trim().toLowerCase()
+  if (!email) return json({ success: false, message: '缺少邮箱' }, 400)
+
+  // 1) 最新通过订单（套餐/时间）
+  const { data: lastOrder, error: lastOrderErr } = await supabaseAdmin
+    .from('payment_orders')
+    .select('plan_id, plan_name, amount, approved_at, created_at, status')
+    .eq('user_email', email)
+    .eq('status', 'approved')
+    .order('approved_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  if (lastOrderErr) return json({ success: false, message: lastOrderErr.message }, 500)
+
+  // 2) 找到 app_users.id（统计房间使用要用 user_id）
+  const { data: u, error: uErr } = await supabaseAdmin
+    .from('app_users')
+    .select('id, email, nickname, created_at, last_login_at, login_count')
+    .eq('email', email)
+    .maybeSingle()
+  if (uErr) return json({ success: false, message: uErr.message }, 500)
+
+  if (!u?.id) {
+    return json({
+      success: true,
+      user: null,
+      lastApprovedOrder: lastOrder || null,
+      usage: {
+        premiumCreates: 0,
+        premiumEnters: 0,
+        instantCreates: 0,
+        instantEnters: 0,
+        participatedRooms: 0,
+      },
+    })
+  }
+
+  const userId = String((u as any).id)
+
+  const countEvents = async (roomType: 'instant' | 'premium', event: string) => {
+    const { count, error } = await supabaseAdmin
+      .from('room_events')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .eq('room_type', roomType)
+      .eq('event', event)
+    if (error) throw new Error(error.message)
+    return Number(count || 0)
+  }
+
+  const participatedRooms = async () => {
+    const { count, error } = await supabaseAdmin
+      .from('room_participants')
+      .select('room_id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+    if (error) throw new Error(error.message)
+    return Number(count || 0)
+  }
+
+  const sumEnterCount = async (roomType: 'instant' | 'premium') => {
+    const { data, error } = await supabaseAdmin
+      .from('room_participants')
+      .select('enter_count')
+      .eq('user_id', userId)
+      .eq('room_type', roomType)
+      .limit(2000)
+    if (error) throw new Error(error.message)
+    return (data || []).reduce((acc: number, r: any) => acc + Number(r?.enter_count || 0), 0)
+  }
+
+  try {
+    const [premiumCreates, instantCreates, premiumEnters, instantEnters, roomsCount] = await Promise.all([
+      countEvents('premium', 'create'),
+      countEvents('instant', 'create'),
+      sumEnterCount('premium'),
+      sumEnterCount('instant'),
+      participatedRooms(),
+    ])
+
+    return json({
+      success: true,
+      user: u,
+      lastApprovedOrder: lastOrder || null,
+      usage: {
+        premiumCreates,
+        premiumEnters,
+        instantCreates,
+        instantEnters,
+        participatedRooms: roomsCount,
+      },
+    })
+  } catch (e: any) {
+    return json({ success: false, message: e?.message || '统计失败' }, 500)
+  }
+}
+
 // ── 路由 ────────────────────────────────────────────────────
 serve(async (req: Request) => {
   // 处理 CORS preflight
@@ -275,7 +397,9 @@ serve(async (req: Request) => {
     if (req.method === 'POST' && path === 'create') return await handleCreate(req)
     if (req.method === 'GET' && path === 'orders') return await handleList(req)
     if (req.method === 'POST' && path === 'approve') return await handleApprove(req)
+    if (req.method === 'POST' && path === 'delete') return await handleDelete(req)
     if (req.method === 'GET' && path === 'check-order') return await handleCheckOrder(req)
+    if (req.method === 'GET' && path === 'user-usage') return await handleUserUsage(req)
     return json({ message: 'Not found' }, 404)
   } catch (e: any) {
     return json({ success: false, message: e.message }, 500)

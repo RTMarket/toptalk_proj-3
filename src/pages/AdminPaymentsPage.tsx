@@ -45,6 +45,11 @@ export default function AdminPaymentsPage() {
   const [selected, setSelected] = useState<PaymentOrder | null>(null)
   const [rejectTarget, setRejectTarget] = useState<PaymentOrder | null>(null)
   const [rejectRemark, setRejectRemark] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<PaymentOrder | null>(null)
+  const [usageEmail, setUsageEmail] = useState('')
+  const [usageLoading, setUsageLoading] = useState(false)
+  const [usageErr, setUsageErr] = useState('')
+  const [usageData, setUsageData] = useState<any | null>(null)
 
   useEffect(() => {
     const t = getAdminToken()
@@ -128,6 +133,66 @@ export default function AdminPaymentsPage() {
     }
   }
 
+  const del = async (order: PaymentOrder) => {
+    if (!SUPABASE_URL) return
+    const t = getAdminToken()
+    if (!t) {
+      navigate('/admin/login', { replace: true })
+      return
+    }
+    setErr('')
+    setInfo('')
+    setLoading(true)
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/bank-transfer-order/delete`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${t}`,
+        },
+        body: JSON.stringify({ orderId: order.id }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.success) throw new Error(data?.message || `删除失败（HTTP ${res.status}）`)
+      setInfo(`已删除订单：${order.order_no}`)
+      setDeleteTarget(null)
+      await fetchOrders()
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '删除失败'
+      setErr(msg)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchUsage = async (email: string) => {
+    if (!SUPABASE_URL) return
+    const t = getAdminToken()
+    if (!t) {
+      navigate('/admin/login', { replace: true })
+      return
+    }
+    const e = (email || '').trim()
+    if (!e) return
+    setUsageErr('')
+    setUsageData(null)
+    setUsageLoading(true)
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/functions/v1/bank-transfer-order/user-usage?email=${encodeURIComponent(e)}`,
+        { headers: { Authorization: `Bearer ${t}` } }
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.success) throw new Error(data?.message || `查询失败（HTTP ${res.status}）`)
+      setUsageData(data)
+    } catch (e2: unknown) {
+      const msg = e2 instanceof Error ? e2.message : '查询失败'
+      setUsageErr(msg)
+    } finally {
+      setUsageLoading(false)
+    }
+  }
+
   const logout = () => {
     sessionStorage.removeItem('toptalk_admin_token')
     localStorage.removeItem('toptalk_admin_token')
@@ -194,6 +259,52 @@ export default function AdminPaymentsPage() {
           </div>
         )}
 
+        {/* 用户使用情况（按邮箱） */}
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 mb-5">
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="flex-1 min-w-[240px]">
+              <div className="text-gray-500 text-xs mb-1">用户邮箱</div>
+              <input
+                value={usageEmail}
+                onChange={e => setUsageEmail(e.target.value)}
+                placeholder="例如：user@example.com"
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-yellow-400/50"
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => fetchUsage(usageEmail)}
+              disabled={usageLoading || !usageEmail.trim()}
+              className="bg-white/10 hover:bg-white/15 border border-white/15 text-white px-4 py-2.5 rounded-xl text-sm disabled:opacity-60"
+            >
+              {usageLoading ? '查询中...' : '查询使用情况'}
+            </button>
+          </div>
+          {usageErr && <div className="mt-3 text-sm text-red-400">❌ {usageErr}</div>}
+          {usageData && (
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+              <div className="bg-white/3 border border-white/10 rounded-xl p-4">
+                <div className="text-gray-500 text-xs mb-2">套餐信息（最近一次通过）</div>
+                <div className="text-white font-semibold">{usageData?.lastApprovedOrder?.plan_name || '—'}</div>
+                <div className="text-gray-600 text-xs mt-1">
+                  审核通过：{formatTime(usageData?.lastApprovedOrder?.approved_at)}
+                </div>
+              </div>
+              <div className="bg-white/3 border border-white/10 rounded-xl p-4">
+                <div className="text-gray-500 text-xs mb-2">高级聊天室使用</div>
+                <div className="text-gray-200">创建次数：<span className="text-yellow-400 font-semibold">{usageData?.usage?.premiumCreates ?? 0}</span></div>
+                <div className="text-gray-200">进入次数：<span className="text-yellow-400 font-semibold">{usageData?.usage?.premiumEnters ?? 0}</span></div>
+              </div>
+              <div className="bg-white/3 border border-white/10 rounded-xl p-4">
+                <div className="text-gray-500 text-xs mb-2">即时聊天室使用</div>
+                <div className="text-gray-200">创建次数：<span className="text-yellow-400 font-semibold">{usageData?.usage?.instantCreates ?? 0}</span></div>
+                <div className="text-gray-200">进入次数：<span className="text-yellow-400 font-semibold">{usageData?.usage?.instantEnters ?? 0}</span></div>
+                <div className="text-gray-600 text-xs mt-1">参与房间数：{usageData?.usage?.participatedRooms ?? 0}</div>
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-white/5">
@@ -246,9 +357,42 @@ export default function AdminPaymentsPage() {
                         >
                           拒绝
                         </button>
+                        <button
+                          type="button"
+                          onClick={() => { setUsageEmail(o.user_email); fetchUsage(o.user_email) }}
+                          disabled={loading}
+                          className="bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-60"
+                        >
+                          使用情况
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteTarget(o)}
+                          disabled={loading}
+                          className="bg-white/5 hover:bg-white/10 border border-white/10 text-red-300 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-60"
+                        >
+                          删除
+                        </button>
                       </div>
                     ) : (
-                      <span className="text-gray-600">—</span>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => { setUsageEmail(o.user_email); fetchUsage(o.user_email) }}
+                          disabled={loading}
+                          className="bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-60"
+                        >
+                          使用情况
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDeleteTarget(o)}
+                          disabled={loading}
+                          className="bg-white/5 hover:bg-white/10 border border-white/10 text-red-300 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-60"
+                        >
+                          删除
+                        </button>
+                      </div>
                     )}
                   </td>
                 </tr>
@@ -306,6 +450,28 @@ export default function AdminPaymentsPage() {
                   className="px-4 py-2 rounded-xl bg-red-500/80 text-white text-sm font-bold disabled:opacity-60"
                 >
                   确认拒绝
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {deleteTarget && (
+          <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setDeleteTarget(null)}>
+            <div className="max-w-md w-full bg-[#0b1730] border border-white/10 rounded-2xl p-6" onClick={e => e.stopPropagation()}>
+              <h3 className="text-white font-bold mb-2">删除订单</h3>
+              <p className="text-gray-500 text-sm mb-4">
+                确认删除订单 <span className="font-mono text-gray-300">{deleteTarget.order_no}</span> 吗？此操作不可恢复。
+              </p>
+              <div className="flex gap-2 justify-end">
+                <button type="button" onClick={() => setDeleteTarget(null)} className="px-4 py-2 rounded-xl border border-white/15 text-gray-400 text-sm">取消</button>
+                <button
+                  type="button"
+                  onClick={() => del(deleteTarget)}
+                  disabled={loading}
+                  className="px-4 py-2 rounded-xl bg-red-500/80 text-white text-sm font-bold disabled:opacity-60"
+                >
+                  确认删除
                 </button>
               </div>
             </div>
