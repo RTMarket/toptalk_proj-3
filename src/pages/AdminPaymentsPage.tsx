@@ -1,0 +1,318 @@
+import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import Navbar from '../components/layout/Navbar'
+import Footer from '../components/layout/Footer'
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+
+type OrderStatus = 'pending' | 'approved' | 'rejected'
+
+type PaymentOrder = {
+  id: string | number
+  order_no: string
+  user_email: string
+  user_nickname?: string | null
+  plan_id: string
+  plan_name: string
+  amount: number
+  bank_transfer_screenshot_url?: string | null
+  status: OrderStatus
+  created_at?: string
+  approved_at?: string | null
+}
+
+function formatTime(iso?: string) {
+  if (!iso) return '—'
+  try {
+    return new Date(iso).toLocaleString('zh-CN', { hour12: false })
+  } catch {
+    return iso
+  }
+}
+
+function getAdminToken(): string {
+  return sessionStorage.getItem('toptalk_admin_token') || localStorage.getItem('toptalk_admin_token') || ''
+}
+
+export default function AdminPaymentsPage() {
+  const navigate = useNavigate()
+  const [adminToken, setAdminToken] = useState('')
+  const [status, setStatus] = useState<OrderStatus>('pending')
+  const [loading, setLoading] = useState(false)
+  const [err, setErr] = useState('')
+  const [info, setInfo] = useState('')
+  const [orders, setOrders] = useState<PaymentOrder[]>([])
+  const [selected, setSelected] = useState<PaymentOrder | null>(null)
+  const [rejectTarget, setRejectTarget] = useState<PaymentOrder | null>(null)
+  const [rejectRemark, setRejectRemark] = useState('')
+
+  useEffect(() => {
+    const t = getAdminToken()
+    if (!t) {
+      navigate('/admin/login', { replace: true })
+      return
+    }
+    setAdminToken(t)
+  }, [navigate])
+
+  const canQuery = useMemo(() => {
+    return !!SUPABASE_URL && !!adminToken.trim()
+  }, [adminToken])
+
+  const fetchOrders = async () => {
+    if (!SUPABASE_URL) {
+      setErr('缺少 VITE_SUPABASE_URL（请在环境变量中配置）')
+      return
+    }
+    const t = adminToken.trim() || getAdminToken()
+    if (!t) {
+      navigate('/admin/login', { replace: true })
+      return
+    }
+    setErr('')
+    setInfo('')
+    setLoading(true)
+    try {
+      const res = await fetch(
+        `${SUPABASE_URL}/functions/v1/bank-transfer-order/orders?status=${encodeURIComponent(status)}`,
+        { headers: { Authorization: `Bearer ${t}` } }
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.success) throw new Error(data?.message || `请求失败（HTTP ${res.status}）`)
+      setOrders((data.orders || []) as PaymentOrder[])
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '加载失败'
+      setErr(msg)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!canQuery) return
+    fetchOrders()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, adminToken])
+
+  const act = async (order: PaymentOrder, action: 'approve' | 'reject', remark?: string) => {
+    if (!SUPABASE_URL) return
+    const t = getAdminToken()
+    if (!t) {
+      navigate('/admin/login', { replace: true })
+      return
+    }
+    setErr('')
+    setInfo('')
+    setLoading(true)
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/bank-transfer-order/approve`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${t}`,
+        },
+        body: JSON.stringify({ orderId: order.id, action, remark: remark || undefined }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.success) throw new Error(data?.message || `操作失败（HTTP ${res.status}）`)
+      if (data.emailWarning) setInfo(String(data.emailWarning))
+      await fetchOrders()
+      setSelected(null)
+      setRejectTarget(null)
+      setRejectRemark('')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '操作失败'
+      setErr(msg)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const logout = () => {
+    sessionStorage.removeItem('toptalk_admin_token')
+    localStorage.removeItem('toptalk_admin_token')
+    navigate('/admin/login', { replace: true })
+  }
+
+  return (
+    <div className="min-h-screen bg-[#050d1a] text-white">
+      <Navbar />
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 pt-28 pb-16">
+        <div className="flex items-start justify-between gap-4 flex-wrap mb-6">
+          <div>
+            <h1 className="text-3xl font-bold">订单审核后台</h1>
+            <p className="text-gray-500 text-sm mt-1">审核用户提交的转账凭证，通过后套餐才会生效</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={fetchOrders}
+              disabled={loading}
+              className="bg-yellow-400 hover:bg-yellow-300 text-[#1a365d] font-bold px-5 py-2.5 rounded-xl text-sm disabled:opacity-60"
+            >
+              {loading ? '加载中...' : '刷新列表'}
+            </button>
+            <button
+              type="button"
+              onClick={logout}
+              className="border border-white/20 text-gray-300 hover:text-white px-5 py-2.5 rounded-xl text-sm"
+            >
+              退出后台
+            </button>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 mb-4">
+          {([
+            { id: 'pending', label: '待审核' },
+            { id: 'approved', label: '已通过' },
+            { id: 'rejected', label: '已拒绝' },
+          ] as const).map(t => (
+            <button
+              key={t.id}
+              onClick={() => setStatus(t.id)}
+              className={`px-4 py-2 rounded-xl text-sm border transition-colors ${
+                status === t.id
+                  ? 'bg-yellow-400/15 text-yellow-300 border-yellow-400/30'
+                  : 'bg-white/5 text-gray-400 border-white/10 hover:text-white hover:border-white/20'
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {info && (
+          <div className="bg-amber-900/30 border border-amber-500/40 rounded-xl p-4 mb-4 text-amber-200 text-sm">
+            ⚠️ {info}
+          </div>
+        )}
+
+        {err && (
+          <div className="bg-red-900/30 border border-red-500/40 rounded-xl p-4 mb-4 text-red-400 text-sm">
+            ❌ {err}
+          </div>
+        )}
+
+        <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-white/5">
+              <tr className="border-b border-white/10">
+                {['订单号', '邮箱', '昵称', '套餐', '金额', '时间', '凭证', '操作'].map(h => (
+                  <th key={h} className="text-left px-5 py-3 text-gray-500 text-xs font-medium">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {orders.map(o => (
+                <tr key={String(o.id)} className="border-b border-white/5 last:border-0 hover:bg-white/3">
+                  <td className="px-5 py-3.5 text-gray-300 font-mono">{o.order_no}</td>
+                  <td className="px-5 py-3.5 text-gray-300">{o.user_email}</td>
+                  <td className="px-5 py-3.5 text-gray-400">{o.user_nickname || '—'}</td>
+                  <td className="px-5 py-3.5 text-gray-200">{o.plan_name}</td>
+                  <td className="px-5 py-3.5 text-yellow-400 font-semibold">¥{o.amount}</td>
+                  <td className="px-5 py-3.5 text-gray-500">{formatTime(o.created_at)}</td>
+                  <td className="px-5 py-3.5">
+                    {o.bank_transfer_screenshot_url ? (
+                      <button
+                        type="button"
+                        onClick={() => setSelected(o)}
+                        className="text-blue-400 hover:text-blue-300 underline underline-offset-2"
+                      >
+                        查看
+                      </button>
+                    ) : (
+                      <span className="text-gray-600">—</span>
+                    )}
+                  </td>
+                  <td className="px-5 py-3.5">
+                    {status === 'pending' ? (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => act(o, 'approve')}
+                          disabled={loading}
+                          className="bg-green-500/20 hover:bg-green-500/30 border border-green-500/30 text-green-300 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-60"
+                        >
+                          通过
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => { setRejectTarget(o); setRejectRemark('') }}
+                          disabled={loading}
+                          className="bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-300 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-60"
+                        >
+                          拒绝
+                        </button>
+                      </div>
+                    ) : (
+                      <span className="text-gray-600">—</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {orders.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-5 py-10 text-center text-gray-600">
+                    {loading ? '加载中...' : '暂无数据'}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {selected?.bank_transfer_screenshot_url && (
+          <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSelected(null)}>
+            <div className="max-w-3xl w-full bg-[#0b1730] border border-white/10 rounded-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
+              <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
+                <div className="text-white font-semibold text-sm">支付凭证预览</div>
+                <button type="button" className="text-gray-500 hover:text-white" onClick={() => setSelected(null)}>✕</button>
+              </div>
+              <div className="p-5">
+                <img
+                  src={selected.bank_transfer_screenshot_url}
+                  alt="支付凭证"
+                  className="w-full max-h-[70vh] object-contain rounded-xl bg-black/30"
+                />
+                <div className="mt-4 text-xs text-gray-500">
+                  {selected.user_email} · {selected.plan_name} · ¥{selected.amount}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {rejectTarget && (
+          <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setRejectTarget(null)}>
+            <div className="max-w-md w-full bg-[#0b1730] border border-white/10 rounded-2xl p-6" onClick={e => e.stopPropagation()}>
+              <h3 className="text-white font-bold mb-2">拒绝订单</h3>
+              <p className="text-gray-500 text-sm mb-4">可选：填写原因，将一并邮件通知用户</p>
+              <textarea
+                value={rejectRemark}
+                onChange={e => setRejectRemark(e.target.value)}
+                placeholder="拒绝原因（可选）"
+                rows={3}
+                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-yellow-400/50 mb-4"
+              />
+              <div className="flex gap-2 justify-end">
+                <button type="button" onClick={() => setRejectTarget(null)} className="px-4 py-2 rounded-xl border border-white/15 text-gray-400 text-sm">取消</button>
+                <button
+                  type="button"
+                  onClick={() => act(rejectTarget, 'reject', rejectRemark)}
+                  disabled={loading}
+                  className="px-4 py-2 rounded-xl bg-red-500/80 text-white text-sm font-bold disabled:opacity-60"
+                >
+                  确认拒绝
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      <Footer />
+    </div>
+  )
+}

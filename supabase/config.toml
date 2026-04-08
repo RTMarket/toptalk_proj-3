@@ -1,0 +1,9 @@
+[functions.bank-transfer-order]
+verify_jwt = false
+
+[functions.auth-email]
+verify_jwt = false
+
+[functions.account]
+verify_jwt = false
+
