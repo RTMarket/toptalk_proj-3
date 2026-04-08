@@ -397,7 +397,7 @@ export default function PremiumRoomSelection() {
 
       <Navbar />
 
-      <div className="flex-1 flex flex-col justify-center max-w-5xl mx-auto px-5 py-10 space-y-8 w-full">
+      <div className="flex-1 flex flex-col justify-center max-w-5xl mx-auto px-5 pt-28 pb-10 space-y-8 w-full">
 
         <div className="text-center">
           <div className="flex items-center justify-center gap-3 mb-2">
@@ -599,70 +599,9 @@ export default function PremiumRoomSelection() {
             </div>
           )}
 
-          {/* 历史房间列表 */}
-          <div className="space-y-2">
-            {myRooms
-              .filter(room => {
-                const isActive = activeRooms.some(r => r.id === room.id);
-                if (isActive) return false;
-                const dissolved: string[] = JSON.parse(localStorage.getItem('toptalk_dissolved') || '[]');
-                if (dissolved.includes(room.id)) return false;
-                const leftRooms: Record<string, number> = JSON.parse(localStorage.getItem('toptalk_left') || '{}');
-                const hasLeft = !!leftRooms[room.id];
-                if (hasLeft && !isPremiumRoomCreator(room.id)) return false;
-                return true;
-              })
-              .map(room => {
-              const remain = roomRemain(room);
-              const isExpired = remain <= 0;
-              const isCreator = isPremiumRoomCreator(room.id);
-              return (
-                <div key={room.id} className="flex items-center justify-between bg-[#0a1628] border border-white/8 rounded-xl px-4 py-3 hover:border-yellow-400/20 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-yellow-400/20 border border-yellow-400/25 flex items-center justify-center text-sm">🔐</div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-white text-sm font-medium">高级聊天室</span>
-                        <span className={isExpired ? 'bg-gray-500/20 text-gray-500 text-xs px-2 py-0.5 rounded-full border border-gray-500/25' : 'bg-yellow-400/20 text-yellow-400 text-xs px-2 py-0.5 rounded-full border border-yellow-400/25'}>
-                          {isExpired ? '已结束' : '进行中'}
-                        </span>
-                        {isCreator && <span className="text-gray-700 text-xs">· 创建者</span>}
-                      </div>
-                      <div className="flex items-center gap-3 mt-0.5">
-                        <span className="text-gray-600 text-xs font-mono">#{room.id}</span>
-                        <span className="text-gray-700 text-xs">{new Date(room.createdAt).toLocaleDateString('zh-CN')}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    {isExpired ? (
-                      <span className="text-gray-600 text-xs">已结束</span>
-                    ) : (
-                      <span className="text-orange-400/70 text-xs">⏱ {formatRemain(remain)}</span>
-                    )}
-                    {!isExpired && (
-                      <button
-                        onClick={() => navigate(`/premium-chat?roomId=${room.id}&destroy=${room.destroy || 900}&password=${room.password}`)}
-                        className="text-yellow-400 text-sm hover:text-yellow-300 transition-colors font-medium"
-                      >进入 →</button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            {myRooms.filter(room => {
-              const isActive = activeRooms.some(r => r.id === room.id);
-              if (isActive) return false;
-              const dissolved: string[] = JSON.parse(localStorage.getItem('toptalk_dissolved') || '[]');
-              if (dissolved.includes(room.id)) return false;
-              const leftRooms: Record<string, number> = JSON.parse(localStorage.getItem('toptalk_left') || '{}');
-              const hasLeft = !!leftRooms[room.id];
-              if (hasLeft && !isPremiumRoomCreator(room.id)) return false;
-              return true;
-            }).length === 0 && activeRooms.length === 0 && (
-              <p className="text-gray-700 text-sm text-center py-6">暂无聊天室记录</p>
-            )}
-          </div>
+          {activeRooms.length === 0 && (
+            <p className="text-gray-700 text-sm text-center py-6">暂无活跃高级聊天室</p>
+          )}
         </div>
       </div>
     </div>

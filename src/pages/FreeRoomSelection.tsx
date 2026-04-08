@@ -215,7 +215,7 @@ export default function FreeRoomSelection() {
     <div className="min-h-screen bg-[#050d1a] flex flex-col">
       <Navbar />
 
-      <div className="flex-1 flex flex-col justify-center max-w-5xl mx-auto px-5 py-10 space-y-8 w-full">
+      <div className="flex-1 flex flex-col justify-center max-w-5xl mx-auto px-5 pt-28 pb-10 space-y-8 w-full">
 
         <div className="text-center">
           <h1 className="text-4xl font-extrabold text-white mb-2">聊天室</h1>
@@ -371,67 +371,9 @@ export default function FreeRoomSelection() {
             </div>
           )}
 
-          {/* 历史房间列表（排除：加入后离开的房间 + 正在进行且已在上面显示的房间） */}
-          <div className="space-y-2">
-            {instantRooms
-              .filter(room => {
-                // 排除：已解散的房间
-                const dissolved: string[] = JSON.parse(localStorage.getItem('toptalk_dissolved') || '[]');
-                if (dissolved.includes(room.id)) return false;
-                // 排除：正在进行中的房间（已在上面卡片单独显示）
-                const isActive = activeRoom?.id === room.id;
-                if (isActive) return false;
-                // 排除：加入后离开的房间（加入者身份，非创建者）
-                const leftRooms: Record<string, number> = JSON.parse(localStorage.getItem('toptalk_left') || '{}');
-                const hasLeft = !!leftRooms[room.id];
-                if (hasLeft && !room.isCreator) return false;
-                return true;
-              })
-              .map(room => {
-              const remain = instantRemain(room.createdAt);
-              const isExpired = remain <= 0;
-              return (
-                <div key={room.id} className="flex items-center justify-between bg-[#0a1628] border border-white/8 rounded-xl px-4 py-3 hover:border-white/15 transition-colors">
-                  <div className="flex items-center gap-3">
-                    <div className="w-8 h-8 rounded-lg bg-blue-500/20 border border-blue-500/25 flex items-center justify-center text-sm">💬</div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-white text-sm font-medium">即时聊天室</span>
-                        <span className={isExpired ? 'bg-gray-500/20 text-gray-500 text-xs px-2 py-0.5 rounded-full border border-gray-500/25' : 'bg-blue-500/20 text-blue-400 text-xs px-2 py-0.5 rounded-full border border-blue-500/25'}>
-                          {isExpired ? '已结束' : '进行中'}
-                        </span>
-                        {room.isCreator && <span className="text-gray-700 text-xs">· 创建者</span>}
-                      </div>
-                      <div className="flex items-center gap-3 mt-0.5">
-                        <span className="text-gray-600 text-xs font-mono">#{room.id}</span>
-                        <span className="text-gray-700 text-xs">{new Date(room.createdAt).toLocaleDateString('zh-CN')}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    {isExpired ? (
-                      <span className="text-gray-600 text-xs">已结束</span>
-                    ) : (
-                      <span className="text-orange-400/70 text-xs">⏱ {formatRemain(remain)}</span>
-                    )}
-                    {!isExpired && (
-                      <button onClick={() => navigate(`/free-chat?roomId=${room.id}&destroy=900`)} className="text-blue-400 text-sm hover:text-blue-300 transition-colors font-medium">进入 →</button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-            {instantRooms.filter(room => {
-              const isActive = activeRoom?.id === room.id;
-              if (isActive) return false;
-              const leftRooms: Record<string, number> = JSON.parse(localStorage.getItem('toptalk_left') || '{}');
-              const hasLeft = !!leftRooms[room.id];
-              if (hasLeft && !room.isCreator) return false;
-              return true;
-            }).length === 0 && (
-              <p className="text-gray-700 text-sm text-center py-6">暂无聊天室记录</p>
-            )}
-          </div>
+          {!isCountingDown && (
+            <p className="text-gray-700 text-sm text-center py-6">暂无活跃聊天室</p>
+          )}
         </div>
       </div>
     </div>
