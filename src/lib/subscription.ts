@@ -7,9 +7,10 @@ const PLAN_EXPIRY_DAYS: Record<string, number> = {
   daily: 1,
   weekly: 7,
   monthly: 30,
-  // 单次高级：用于创建 1 个高级聊天室。当前实现用“1天有效期”避免立刻过期。
-  // 如需严格“次数”消耗，后续可改为 remaining 次数逻辑。
-  single: 1,
+  // 单次高级：不按时间过期，而是“创建次数=1”消耗（创建一次高级聊天室后即视为用完）。
+  // 这里给一个很长的有效期，避免用户“买了但还没用”却因为时间到了而失效。
+  // 真正的限制在 PremiumRoomSelection.tsx 的单次消耗逻辑里。
+  single: 3650,
   enterprise: 30,
   enterprise_pro: 30,
 }

@@ -44,6 +44,31 @@ function formatRemain(ms: number): string {
   return `${s}秒`;
 }
 
+function getSinglePurchaseStamp(): string {
+  // 以“购买时间戳”作为一次单次套餐的唯一标识，便于用户再次购买单次时重新可用
+  return (localStorage.getItem('toptalk_plan_purchased') || '').trim() || 'unknown';
+}
+
+function isSingleConsumedForCurrentPurchase(): boolean {
+  try {
+    const consumedAt = (localStorage.getItem('toptalk_single_consumed_at') || '').trim();
+    const consumedPurchase = (localStorage.getItem('toptalk_single_consumed_purchase') || '').trim();
+    if (!consumedAt) return false;
+    return consumedPurchase === getSinglePurchaseStamp();
+  } catch {
+    return false;
+  }
+}
+
+function markSingleConsumedNow(): void {
+  try {
+    localStorage.setItem('toptalk_single_consumed_at', new Date().toISOString());
+    localStorage.setItem('toptalk_single_consumed_purchase', getSinglePurchaseStamp());
+  } catch {
+    // ignore
+  }
+}
+
 // ── 套餐弹窗组件 ────────────────────────────────────────────────────────────
 const PLAN_META: Record<string, { emoji: string; tag: string; tagColor: string; bgFrom: string; bgTo: string; btnFrom: string; btnTo: string }> = {
   single:         { emoji: '⚡', tag: '单次', tagColor: 'bg-orange-500/20 text-orange-400 border-orange-500/30', bgFrom: 'from-orange-500/5', bgTo: 'to-orange-600/5', btnFrom: 'from-orange-400', btnTo: 'to-amber-500' },
@@ -266,7 +291,8 @@ export default function PremiumRoomSelection() {
     const plan = pricingPlans.find(p => p.id === planId);
     if (!plan) return;
     const expireAt = new Date();
-    if (plan.type === 'daily') expireAt.setDate(expireAt.getDate() + 1);
+    if (plan.type === 'single') expireAt.setFullYear(expireAt.getFullYear() + 10);
+    else if (plan.type === 'daily') expireAt.setDate(expireAt.getDate() + 1);
     else if (plan.type === 'weekly') expireAt.setDate(expireAt.getDate() + 7);
     else if (plan.type === 'monthly') expireAt.setMonth(expireAt.getMonth() + 1);
     else if (plan.type === 'enterprise' || plan.type === 'enterprise_pro') expireAt.setMonth(expireAt.getMonth() + 1);
@@ -289,12 +315,17 @@ export default function PremiumRoomSelection() {
   const currentPlan = pricingPlans.find(p => p.id === currentPlanId) || pricingPlans.find(p => p.id === 'free')!;
   const maxActive = subscribed ? (Number(currentPlan.roomCount) || 1) : 0;
   const activeCount = activeRooms.length;
-  const canCreate = subscribed && activeCount < maxActive;
+  const singleConsumed = currentPlanId === 'single' && isSingleConsumedForCurrentPurchase();
+  const canCreate = subscribed && !singleConsumed && activeCount < maxActive;
   const canJoin = activeCount < maxActive;
 
   const handleCreateRoom = async () => {
     if (!createPassword || !/^\d{4}$/.test(createPassword)) { setCreateError('请输入4位数字房间密码'); return; }
     if (!subscribed) { setCreateError('请先订阅套餐'); return; }
+    if (currentPlanId === 'single' && isSingleConsumedForCurrentPurchase()) {
+      setCreateError('单次高级（9.9）已使用：该套餐仅允许创建 1 次高级聊天室。如需再次创建请升级/更换套餐。');
+      return;
+    }
     if (activeRooms.length >= maxActive) { setCreateError(`当前套餐最多同时活跃 ${maxActive} 个高级房间（创建/加入都算）`); return; }
     setCreateError('');
     setCreateLoading(true);
@@ -325,6 +356,10 @@ export default function PremiumRoomSelection() {
     } catch { /* ignore */ }
     upsertActivePremiumRoom({ id: newId, createdAt: now, destroySeconds: createDuration, role: 'creator', password: createPassword });
     setActiveRooms(getActivePremiumRooms());
+    // 单次高级：一旦“创建”成功即视为已消耗（加入不消耗）
+    if (currentPlanId === 'single') {
+      markSingleConsumedNow();
+    }
 
     setCreateLoading(false);
     setCreatePassword('');
