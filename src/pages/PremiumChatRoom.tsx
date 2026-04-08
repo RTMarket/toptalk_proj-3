@@ -78,7 +78,9 @@ export default function PremiumChatRoom() {
   const [roomLeft, setRoomLeft] = useState(destroyParam);
   const [onlineCount, setOnlineCount] = useState(1);
   const userIdRef = useRef(`u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
+  const nicknameRef = useRef('匿名用户');
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const [userOrder, setUserOrder] = useState<string[]>([]);
 
   const [overlayType, setOverlayType] = useState<'dissolving' | 'leaving' | 'expired' | null>(null);
   const [showDissolveConfirm, setShowDissolveConfirm] = useState(false);
@@ -96,6 +98,19 @@ export default function PremiumChatRoom() {
     file: File; url: string; name: string;
     size: string; mime: string; allowDownload: boolean;
   } | null>(null);
+
+  // ── 读取昵称（用于消息展示/广播）────────────────────────
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem('toptalk_user');
+      if (!stored) return;
+      const u = JSON.parse(stored);
+      const name = u.nickname || u.email?.split('@')[0] || '用户';
+      nicknameRef.current = String(name || '用户');
+    } catch {
+      // ignore
+    }
+  }, []);
 
   // ── 创建者判断 ─────────────────────────────────────
   const amICreator = (() => {
@@ -139,14 +154,29 @@ export default function PremiumChatRoom() {
     });
     channelRef.current = channel;
 
-    const updatePresenceCount = () => {
+    const computeUserOrderFromPresence = () => {
       try {
-        const state = channel.presenceState();
-        const count = Object.keys(state || {}).length;
-        setOnlineCount(count > 0 ? count : 1);
+        const state = channel.presenceState() as any;
+        const entries = Object.entries(state || {}) as Array<[string, any]>;
+        const rows = entries.map(([key, v]) => {
+          const metas: any[] = Array.isArray(v?.metas) ? v.metas : [];
+          const firstOnlineAt = metas
+            .map(m => String(m?.online_at || ''))
+            .filter(Boolean)
+            .sort()[0];
+          return { key, firstOnlineAt: firstOnlineAt || '9999-12-31T23:59:59.999Z' };
+        });
+        rows.sort((a, b) => a.firstOnlineAt.localeCompare(b.firstOnlineAt));
+        return rows.map(r => r.key);
       } catch {
-        setOnlineCount(1);
+        return [] as string[];
       }
+    };
+
+    const updatePresence = () => {
+      const order = computeUserOrderFromPresence();
+      setUserOrder(order);
+      setOnlineCount(order.length > 0 ? order.length : 1);
     };
 
     // 监听新消息广播（己方已通过 self:false 过滤；文本 sender 为对方 userId，文件为 'me'）
@@ -166,16 +196,16 @@ export default function PremiumChatRoom() {
       setTimeout(() => window.location.replace('/rooms-premium'), 2100);
     });
 
-    channel.on('presence', { event: 'sync' }, updatePresenceCount);
-    channel.on('presence', { event: 'join' }, updatePresenceCount);
-    channel.on('presence', { event: 'leave' }, updatePresenceCount);
+    channel.on('presence', { event: 'sync' }, updatePresence);
+    channel.on('presence', { event: 'join' }, updatePresence);
+    channel.on('presence', { event: 'leave' }, updatePresence);
 
     channel.subscribe(status => {
       if (status !== 'SUBSCRIBED') return;
       channel
         .track({ userId: uid, roomId, online_at: new Date().toISOString() })
-        .then(() => updatePresenceCount())
-        .catch(() => updatePresenceCount());
+        .then(() => updatePresence())
+        .catch(() => updatePresence());
     });
 
     return () => {
@@ -267,10 +297,12 @@ export default function PremiumChatRoom() {
     if (sendMode === 'text' && !inputText.trim()) return;
     if (sendMode === 'file' && !pendingFile) return;
     const now = Date.now();
+    const myId = userIdRef.current;
+    const myName = nicknameRef.current || '用户';
 
     if (sendMode === 'file' && pendingFile) {
       const newMsg: Message = {
-        id: Date.now().toString(), type: 'file', sender: 'me', senderName: '我',
+        id: `${Date.now()}_${myId}`, type: 'file', sender: myId, senderName: myName,
         fileName: pendingFile.name, fileUrl: pendingFile.url,
         fileSize: pendingFile.size, fileType: pendingFile.mime,
         allowDownload: pendingFile.allowDownload,
@@ -286,7 +318,7 @@ export default function PremiumChatRoom() {
     }
 
     const newMsg: Message = {
-      id: `${Date.now()}_${userIdRef.current}`, type: 'text', sender: userIdRef.current, senderName: '我',
+      id: `${Date.now()}_${myId}`, type: 'text', sender: myId, senderName: myName,
       text: inputText, allowDownload: false,
       destroySeconds: msgDestroySeconds,
       expireAt: msgDestroySeconds > 0 ? now + msgDestroySeconds * 1000 : 0,
@@ -297,7 +329,7 @@ export default function PremiumChatRoom() {
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     channelRef.current?.send({ type: 'broadcast', event: 'new_message', payload: newMsg });
     supabase.from('messages').insert({
-      room_id: `premium_${roomId}`, sender_id: userIdRef.current, sender_name: '我',
+      room_id: `premium_${roomId}`, sender_id: myId, sender_name: myName,
       type: 'text', content: inputText, destroy_seconds: msgDestroySeconds,
     }).then(({ error }) => { if (error) console.warn('持久化失败:', error.message); });
   };
@@ -460,13 +492,28 @@ export default function PremiumChatRoom() {
       {/* ── Messages ── */}
       <div className="flex-1 overflow-auto max-w-5xl w-full mx-auto px-4 pt-32 pb-4 space-y-4 flex flex-col justify-center">
         {messages.map(msg => {
-          const isMine = !!msg.isMine;
+          const isMine = msg.sender === userIdRef.current;
           const isSystem = msg.sender === 'system';
           const isFile = msg.type === 'file';
           const isImage = isFile && isImageFile(msg.fileType || '');
           const remain = msgTimes[msg.id] ?? (msg.expireAt > 0 ? Math.max(0, msg.expireAt - Date.now()) : 0);
           const expired = msg.expireAt > 0 && remain <= 0;
           const progress = msg.destroySeconds > 0 ? Math.max(0, remain / (msg.destroySeconds * 1000)) : 1;
+          const senderId = msg.sender;
+          const joinIndex = (() => {
+            const idx = userOrder.indexOf(senderId);
+            return idx >= 0 ? idx : 0;
+          })();
+          const side = joinIndex % 2 === 0 ? 'right' : 'left';
+          const colorIdx = joinIndex % 4;
+          const bubbleClass = (() => {
+            // 0: yellow, 1: white, 2: blue, 3: green
+            if (colorIdx === 0) return 'bg-gradient-to-br from-yellow-400/90 to-yellow-500/90 text-[#1a365d]';
+            if (colorIdx === 1) return 'bg-white/10 border border-white/15 text-white';
+            if (colorIdx === 2) return 'bg-blue-500/20 border border-blue-400/30 text-white';
+            return 'bg-green-500/20 border border-green-400/30 text-white';
+          })();
+          const nameTextClass = colorIdx === 0 ? 'text-gray-700' : 'text-gray-500';
 
           if (isSystem) {
             return (
@@ -483,16 +530,16 @@ export default function PremiumChatRoom() {
           if (expired) return null;
 
           return (
-            <div key={msg.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-              <div className={`flex gap-2 max-w-xl ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
-                {!isMine && (
+            <div key={msg.id} className={`flex ${side === 'right' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`flex gap-2 max-w-xl ${side === 'right' ? 'flex-row-reverse' : 'flex-row'}`}>
+                {side === 'left' && (
                   <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400/40 to-amber-600/40 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5">
-                    {msg.senderName[0].toUpperCase()}
+                    {(msg.senderName || '?')[0].toUpperCase()}
                   </div>
                 )}
-                <div className={`flex flex-col gap-1 ${isMine ? 'items-end' : 'items-start'}`}>
-                  <div className={`flex items-center gap-1.5 ${isMine ? 'flex-row-reverse' : ''}`}>
-                    <span className="text-gray-500 text-xs">{msg.senderName}</span>
+                <div className={`flex flex-col gap-1 ${side === 'right' ? 'items-end' : 'items-start'}`}>
+                  <div className={`flex items-center gap-1.5 ${side === 'right' ? 'flex-row-reverse' : ''}`}>
+                    <span className={`${nameTextClass} text-xs`}>{msg.senderName}</span>
                     <span className="text-gray-700 text-xs">
                       {new Date(msg.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
                     </span>
@@ -504,9 +551,9 @@ export default function PremiumChatRoom() {
                     )}
                   </div>
                   <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                    isMine
-                      ? 'bg-gradient-to-br from-yellow-400/90 to-yellow-500/90 text-[#1a365d] rounded-br-md'
-                      : 'bg-white/10 border border-white/10 text-white rounded-bl-md'
+                    side === 'right'
+                      ? `${bubbleClass} rounded-br-md`
+                      : `${bubbleClass} rounded-bl-md`
                   }`}>
                     {msg.type === 'text' && <p className="break-all">{msg.text}</p>}
                     {isFile && (

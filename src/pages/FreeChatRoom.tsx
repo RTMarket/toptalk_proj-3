@@ -94,6 +94,7 @@ export default function FreeChatRoom() {
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const userIdRef = useRef(`u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
   const nicknameRef = useRef('匿名用户');
+  const [userOrder, setUserOrder] = useState<string[]>([]);
 
   // 统计：进入/离开房间（不影响聊天功能，失败忽略）
   useEffect(() => {
@@ -128,19 +129,34 @@ export default function FreeChatRoom() {
     });
     channelRef.current = channel;
 
-    const updatePresenceCount = () => {
+    const computeUserOrderFromPresence = () => {
       try {
-        const state = channel.presenceState();
-        const n = Object.keys(state || {}).length;
-        setOnlineCount(n > 0 ? n : 1);
+        const state = channel.presenceState() as any;
+        const entries = Object.entries(state || {}) as Array<[string, any]>;
+        const rows = entries.map(([key, v]) => {
+          const metas: any[] = Array.isArray(v?.metas) ? v.metas : [];
+          const firstOnlineAt = metas
+            .map(m => String(m?.online_at || ''))
+            .filter(Boolean)
+            .sort()[0];
+          return { key, firstOnlineAt: firstOnlineAt || '9999-12-31T23:59:59.999Z' };
+        });
+        rows.sort((a, b) => a.firstOnlineAt.localeCompare(b.firstOnlineAt));
+        return rows.map(r => r.key);
       } catch {
-        setOnlineCount(1);
+        return [] as string[];
       }
     };
 
-    channel.on('presence', { event: 'sync' }, updatePresenceCount);
-    channel.on('presence', { event: 'join' }, updatePresenceCount);
-    channel.on('presence', { event: 'leave' }, updatePresenceCount);
+    const updatePresence = () => {
+      const order = computeUserOrderFromPresence();
+      setUserOrder(order);
+      setOnlineCount(order.length > 0 ? order.length : 1);
+    };
+
+    channel.on('presence', { event: 'sync' }, updatePresence);
+    channel.on('presence', { event: 'join' }, updatePresence);
+    channel.on('presence', { event: 'leave' }, updatePresence);
 
     // 监听新消息
     channel.on('broadcast', { event: 'new_message' }, ({ payload }) => {
@@ -165,7 +181,7 @@ export default function FreeChatRoom() {
         roomId,
         online_at: new Date().toISOString(),
       });
-      updatePresenceCount();
+      updatePresence();
     });
 
     return () => {
@@ -370,13 +386,27 @@ export default function FreeChatRoom() {
             {/* 消息列表（可滚动） */}
             <div className="flex-1 overflow-auto px-5 py-4 space-y-3">
               {messages.map(msg => {
-                const isMine = !!msg.isMine;
+                const isMine = msg.sender === userIdRef.current;
                 const isSystem = msg.sender === 'system';
                 const isFile = msg.type === 'file';
                 const isImage = isFile && isImageFile(msg.fileType || '');
                 const remain = msgTimes[msg.id] ?? (msg.expireAt > 0 ? Math.max(0, msg.expireAt - Date.now()) : 0);
                 const expired = msg.expireAt > 0 && remain <= 0;
                 const progress = msg.destroySeconds > 0 ? Math.max(0, remain / (msg.destroySeconds * 1000)) : 1;
+                const senderId = msg.sender;
+                const joinIndex = (() => {
+                  const idx = userOrder.indexOf(senderId);
+                  return idx >= 0 ? idx : 0;
+                })();
+                const side = joinIndex % 2 === 0 ? 'right' : 'left';
+                const colorIdx = joinIndex % 4;
+                const bubbleClass = (() => {
+                  if (colorIdx === 0) return 'bg-gradient-to-br from-yellow-400/90 to-yellow-500/90 text-[#1a365d]';
+                  if (colorIdx === 1) return 'bg-white/10 border border-white/15 text-white';
+                  if (colorIdx === 2) return 'bg-blue-500/20 border border-blue-400/30 text-white';
+                  return 'bg-green-500/20 border border-green-400/30 text-white';
+                })();
+                const nameTextClass = colorIdx === 0 ? 'text-gray-700' : 'text-gray-500';
 
                 if (isSystem) {
                   return (
@@ -391,21 +421,21 @@ export default function FreeChatRoom() {
                 if (expired) return null;
 
                 return (
-                  <div key={msg.id} className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`flex gap-2 max-w-[70%] ${isMine ? 'flex-row-reverse' : 'flex-row'}`}>
+                  <div key={msg.id} className={`flex ${side === 'right' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`flex gap-2 max-w-[70%] ${side === 'right' ? 'flex-row-reverse' : 'flex-row'}`}>
 
                       {/* 头像 */}
-                      {!isMine && (
+                      {side === 'left' && (
                         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400/60 to-blue-600/60 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5">
                           {(msg.senderName || '?')[0].toUpperCase()}
                         </div>
                       )}
 
-                      <div className={`flex flex-col gap-0.5 ${isMine ? 'items-end' : 'items-start'}`}>
+                      <div className={`flex flex-col gap-0.5 ${side === 'right' ? 'items-end' : 'items-start'}`}>
 
                         {/* 昵称 + 时间 */}
-                        <div className={`flex items-center gap-1.5 ${isMine ? 'flex-row-reverse' : ''}`}>
-                          <span className={`text-xs font-semibold ${isMine ? 'text-yellow-400' : 'text-blue-400'}`}>{msg.senderName}</span>
+                        <div className={`flex items-center gap-1.5 ${side === 'right' ? 'flex-row-reverse' : ''}`}>
+                          <span className={`text-xs font-semibold ${side === 'right' ? 'text-yellow-400' : 'text-blue-400'}`}>{msg.senderName}</span>
                           <span className="text-gray-700 text-xs">{new Date(msg.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
                           {msg.destroySeconds > 0 && remain > 0 && (
                             <span className="text-orange-400/80 text-xs">🔥 {formatRemain(remain)}</span>
@@ -414,9 +444,9 @@ export default function FreeChatRoom() {
 
                         {/* 消息气泡 */}
                         <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                          isMine
-                            ? 'bg-gradient-to-br from-yellow-400/90 to-yellow-500/90 text-[#1a365d] rounded-br-sm'
-                            : 'bg-white/10 border border-white/10 text-white rounded-bl-sm'
+                          side === 'right'
+                            ? `${bubbleClass} rounded-br-sm`
+                            : `${bubbleClass} rounded-bl-sm`
                         }`}>
                           {msg.type === 'text' && <p className="break-all">{msg.text}</p>}
                           {isFile && !isImage && (
@@ -424,7 +454,7 @@ export default function FreeChatRoom() {
                               <span className="text-3xl flex-shrink-0">{getFileIcon(msg.fileType || '', msg.fileName || '')}</span>
                               <div className="flex-1 min-w-0">
                                 <div className="text-white font-medium text-sm break-all">{msg.fileName}</div>
-                                <div className="text-gray-500 text-xs mt-0.5">{msg.fileSize}</div>
+                                <div className={`${nameTextClass} text-xs mt-0.5`}>{msg.fileSize}</div>
                               </div>
                             </div>
                           )}
