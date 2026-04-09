@@ -203,6 +203,9 @@ function PricingModal({ onClose }: { onClose: () => void }) {
 export default function PremiumRoomSelection() {
   const navigate = useNavigate();
   const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [loggedIn, setLoggedIn] = useState(() => {
+    try { return !!localStorage.getItem('toptalk_user'); } catch { return false; }
+  });
   const [showPricing, setShowPricing] = useState(false);
   const [createPassword, setCreatePassword] = useState('');
   const [createDuration, setCreateDuration] = useState(900);
@@ -221,6 +224,7 @@ export default function PremiumRoomSelection() {
   useEffect(function() {
     function loadSub() {
       try {
+        setLoggedIn(!!localStorage.getItem('toptalk_user'));
         var raw = localStorage.getItem('toptalk_subscription');
         if (raw) {
           setSubscription(JSON.parse(raw));
@@ -235,7 +239,10 @@ export default function PremiumRoomSelection() {
             setSubscription(null);
           }
         }
-      } catch { setSubscription(null); }
+      } catch {
+        setSubscription(null);
+        try { setLoggedIn(!!localStorage.getItem('toptalk_user')); } catch { setLoggedIn(false); }
+      }
     }
     loadSub();
     // 进入高级页时，主动向后端拉一次“已通过订单”同步（避免用户已购买但本地未更新）
@@ -315,9 +322,12 @@ export default function PremiumRoomSelection() {
   const currentPlan = pricingPlans.find(p => p.id === currentPlanId) || pricingPlans.find(p => p.id === 'free')!;
   const maxActive = subscribed ? (Number(currentPlan.roomCount) || 1) : 0;
   const activeCount = activeRooms.length;
+  const activeMemberCount = activeRooms.filter(r => r.role === 'member').length;
+  // 加入者：同一时刻只能占 1 间（离开房间后活跃列表移除即可再加入其他房间）
+  const joinWithinPlan = !subscribed || activeCount < maxActive;
+  const canJoin = loggedIn && activeMemberCount < 1 && joinWithinPlan;
   const singleConsumed = currentPlanId === 'single' && isSingleConsumedForCurrentPurchase();
   const canCreate = subscribed && !singleConsumed && activeCount < maxActive;
-  const canJoin = activeCount < maxActive;
 
   const handleCreateRoom = async () => {
     if (!createPassword || !/^\d{4}$/.test(createPassword)) { setCreateError('请输入4位数字房间密码'); return; }
@@ -373,7 +383,15 @@ export default function PremiumRoomSelection() {
   const handleJoinRoom = async () => {
     if (!joinRoomId || joinRoomId.length !== 6) { setJoinError('请输入6位房间号'); return; }
     if (!joinPassword) { setJoinError('请输入房间密码'); return; }
-    if (activeRooms.length >= maxActive) { setJoinError(`当前套餐最多同时活跃 ${maxActive} 个高级房间（创建/加入都算）`); return; }
+    if (!loggedIn) { setJoinError('请先登录后再加入高级聊天室'); return; }
+    if (activeMemberCount >= 1) {
+      setJoinError('同一时间只能加入一间高级聊天室，请先离开当前房间后再加入其他房间');
+      return;
+    }
+    if (subscribed && activeRooms.length >= maxActive) {
+      setJoinError(`当前套餐最多同时活跃 ${maxActive} 个高级房间（创建/加入都算），请先结束或解散其中一个`);
+      return;
+    }
 
     setJoinError('');
     setJoinLoading(true);
@@ -439,9 +457,10 @@ export default function PremiumRoomSelection() {
             <span className="text-3xl">🔐</span>
             <h1 className="text-4xl font-extrabold text-white">高级聊天室</h1>
           </div>
-          <div className="flex items-center justify-center gap-3">
-            <span className="bg-yellow-400/20 text-yellow-400 text-xs px-3 py-1 rounded-full border border-yellow-400/30 font-medium">需订阅</span>
-            <span className="text-gray-500 text-xs">文件传输 · 2.5小时有效期 · 密码保护</span>
+          <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
+            <span className="bg-yellow-400/20 text-yellow-400 text-xs px-3 py-1 rounded-full border border-yellow-400/30 font-medium">创建需订阅</span>
+            <span className="bg-emerald-500/15 text-emerald-300 text-xs px-3 py-1 rounded-full border border-emerald-500/25 font-medium">加入需登录 · 单次一间</span>
+            <span className="text-gray-500 text-xs w-full sm:w-auto text-center sm:text-left">文件传输 · 2.5小时有效期 · 密码保护</span>
           </div>
         </div>
 
@@ -452,12 +471,32 @@ export default function PremiumRoomSelection() {
               <div className="w-10 h-10 rounded-xl bg-yellow-400/20 border border-yellow-400/25 flex items-center justify-center"><span className="text-xl">💬</span></div>
               <div>
                 <h2 className="text-white font-bold text-base">加入高级房间</h2>
-                <p className="text-gray-600 text-xs mt-0.5">输入房间号 + 密码进入</p>
+                <p className="text-gray-600 text-xs mt-0.5">登录后凭房间号 + 密码进入（无需订阅）</p>
               </div>
             </div>
 
-            {/* 达到套餐上限时提示 */}
-            {!canJoin && subscribed && (
+            <p className="text-gray-600 text-xs mb-3 leading-relaxed">
+              未订阅也可加入他人房间；同一时间只能加入一间，离开当前房间后即可再加入其他高级房间。
+            </p>
+
+            {!loggedIn && (
+              <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3 mb-3 text-gray-400 text-xs">
+                请先登录后再加入高级聊天室。
+              </div>
+            )}
+
+            {loggedIn && activeMemberCount >= 1 && (
+              <div className="bg-orange-400/10 border border-orange-400/20 rounded-xl px-4 py-3 mb-3 flex items-center gap-2">
+                <svg className="w-4 h-4 text-orange-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <span className="text-orange-400 text-xs font-medium">
+                  您已在另一间高级聊天室中（加入身份）。请先离开该房间，再加入其他房间。
+                </span>
+              </div>
+            )}
+
+            {loggedIn && activeMemberCount < 1 && subscribed && activeCount >= maxActive && (
               <div className="bg-orange-400/10 border border-orange-400/20 rounded-xl px-4 py-3 mb-3 flex items-center gap-2">
                 <svg className="w-4 h-4 text-orange-400 animate-pulse flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
@@ -491,7 +530,16 @@ export default function PremiumRoomSelection() {
                 disabled={joinLoading || !canJoin}
                 className="w-full bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-300 hover:to-amber-400 disabled:opacity-40 disabled:cursor-not-allowed text-[#1a365d] font-bold py-3 rounded-xl text-sm transition-all flex items-center justify-center gap-2"
               >
-                {joinLoading ? '⟳' : '↪️'} {joinLoading ? '加入中...' : !canJoin ? '已达上限' : '进入聊天室'}
+                {joinLoading ? '⟳' : '↪️'}{' '}
+                {joinLoading
+                  ? '加入中...'
+                  : !loggedIn
+                    ? '请先登录'
+                    : activeMemberCount >= 1
+                      ? '已有加入中的房间'
+                      : subscribed && activeCount >= maxActive
+                        ? '已达套餐上限'
+                        : '进入聊天室'}
               </button>
             </div>
           </div>
@@ -558,8 +606,8 @@ export default function PremiumRoomSelection() {
             <div className="bg-[#0a1628] border border-yellow-400/20 rounded-2xl p-6 flex flex-col justify-center">
               <div className="text-center mb-5">
                 <div className="w-14 h-14 rounded-2xl bg-yellow-400/20 border border-yellow-400/30 flex items-center justify-center text-3xl mx-auto mb-3">🔐</div>
-                <h2 className="text-white font-bold text-lg mb-1">解锁高级聊天室</h2>
-                <p className="text-gray-500 text-sm">订阅即可使用文件传输、密码保护、2.5小时阅后即焚</p>
+                <h2 className="text-white font-bold text-lg mb-1">解锁创建高级房间</h2>
+                <p className="text-gray-500 text-sm">订阅后可创建房间；已登录用户也可凭房间号与密码加入他人高级聊天室（左侧）</p>
               </div>
               <div className="space-y-2 mb-5">
                 {['文字+文件+图片消息', '阅后即焚（最长2.5小时）', '房间密码保护'].map((f, i) => (

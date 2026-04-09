@@ -123,6 +123,17 @@ export default function PremiumChatRoom() {
   // 统计：进入/离开房间（不影响聊天功能，失败忽略）
   useEffect(() => {
     if (!roomId || roomId === '------') return;
+    // 加入者：同一时刻只允许一间「加入中」高级房（防直链绕过选择页）
+    if (!amICreator) {
+      try {
+        const active = getActivePremiumRooms();
+        const otherMember = active.find(r => r.role === 'member' && r.id !== roomId);
+        if (otherMember) {
+          window.location.replace('/rooms-premium');
+          return;
+        }
+      } catch { /* ignore */ }
+    }
     postRoomEvent({ roomId, roomType: 'premium', event: 'enter' }).catch(() => {});
     // 标记为活跃房间（加入也算）
     const nowIso = new Date().toISOString();
