@@ -6,6 +6,7 @@ import Navbar from '../components/layout/Navbar';
 import { syncSubscriptionFromApprovedOrder } from '../lib/subscription';
 import { postRoomEvent } from '../lib/accountApi';
 import { activeRoomRemainingMs, cleanupExpired, getActivePremiumRooms, PremiumActiveRoom, removeActivePremiumRoom, upsertActivePremiumRoom } from '../lib/premiumActiveRooms';
+import { getSinglePurchaseStamp, isSingleConsumedForCurrentPurchase } from '../lib/singlePlanConsumption';
 
 interface PremiumRoom {
   id: string;
@@ -44,22 +45,6 @@ function formatRemain(ms: number): string {
   if (s >= 3600) return `${Math.floor(s / 3600)}小时${Math.floor((s % 3600) / 60)}分`;
   if (s >= 60) return `${Math.floor(s / 60)}分${s % 60}秒`;
   return `${s}秒`;
-}
-
-function getSinglePurchaseStamp(): string {
-  // 以“购买时间戳”作为一次单次套餐的唯一标识，便于用户再次购买单次时重新可用
-  return (localStorage.getItem('toptalk_plan_purchased') || '').trim() || 'unknown';
-}
-
-function isSingleConsumedForCurrentPurchase(): boolean {
-  try {
-    const consumedAt = (localStorage.getItem('toptalk_single_consumed_at') || '').trim();
-    const consumedPurchase = (localStorage.getItem('toptalk_single_consumed_purchase') || '').trim();
-    if (!consumedAt) return false;
-    return consumedPurchase === getSinglePurchaseStamp();
-  } catch {
-    return false;
-  }
 }
 
 function markSingleConsumedNow(): void {

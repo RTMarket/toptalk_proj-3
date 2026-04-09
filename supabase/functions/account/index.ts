@@ -268,6 +268,12 @@ const PLAN_EXPIRY_DAYS: Record<string, number> = {
   enterprise_pro: 30,
 }
 
+/** 以中国时区（UTC+8）的“当天 00:00”作为计时起点 */
+function startOfDayCstMs(epochMs: number): number {
+  const offset = 8 * 3600 * 1000
+  return Math.floor((epochMs + offset) / 86400000) * 86400000 - offset
+}
+
 async function handleRedeemInvite(req: Request) {
   const g = await requireSession(req)
   if (!g.ok) return g.res
@@ -294,8 +300,9 @@ async function handleRedeemInvite(req: Request) {
   const planId = String((row as any).plan_id || '')
   const days = PLAN_EXPIRY_DAYS[planId] ?? 30
   const nowMs = Date.now()
-  const purchasedAt = new Date(nowMs).toISOString()
-  const expiresAt = new Date(nowMs + days * 86400000).toISOString()
+  const baseMs = startOfDayCstMs(nowMs)
+  const purchasedAt = new Date(baseMs).toISOString()
+  const expiresAt = new Date(baseMs + days * 86400000).toISOString()
 
   const { error: upErr } = await supabaseAdmin
     .from('app_users')

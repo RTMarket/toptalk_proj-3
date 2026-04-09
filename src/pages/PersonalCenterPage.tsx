@@ -6,6 +6,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { clampNickname, isValidNickname, NICKNAME_MAX_LEN } from '../lib/nickname';
 import { isValidInviteCode, normalizeInviteCode, redeemInviteCode } from '../lib/inviteCodeApi';
 import { accountMe } from '../lib/accountApi';
+import { isSingleConsumedForCurrentPurchase } from '../lib/singlePlanConsumption';
 
 const planLabels: Record<string, string> = {
   free: '免费版', single: '单次高级', daily: '日卡', weekly: '周卡',
@@ -62,6 +63,13 @@ function toMs(iso?: string | null): number | null {
   return Number.isFinite(t) ? t : null;
 }
 
+/** 以中国时区（UTC+8）的“当天 00:00”作为计时起点 */
+function startOfDayCstMs(epochMs: number): number {
+  const offset = 8 * 60 * 60 * 1000;
+  return Math.floor((epochMs + offset) / 86400000) * 86400000 - offset;
+}
+
+/** 按自然日计时的套餐周期（天）。单次高级不按天展示/校准，由「创建房间」消耗逻辑控制。 */
 function getPlanDays(planId: string): number | null {
   switch (planId) {
     case 'daily': return 1;
@@ -69,8 +77,7 @@ function getPlanDays(planId: string): number | null {
     case 'monthly': return 30;
     case 'enterprise': return 30;
     case 'enterprise_pro': return 30;
-    // 单次高级：不按时间过期，给一个很长的展示有效期（由高级聊天室“单次消耗”逻辑控制）
-    case 'single': return 3650;
+    case 'single': return null;
     default: return null;
   }
 }
@@ -174,7 +181,8 @@ export default function PersonalCenterPage() {
       // 如果本地缓存出现异常（例如显示 58 天），在个人中心做一次校准并写回 localStorage
       try {
         const days = getPlanDays(p);
-        const purchasedMs = toMs(purchased);
+        const purchasedMsRaw = toMs(purchased);
+        const purchasedMs = purchasedMsRaw ? startOfDayCstMs(purchasedMsRaw) : null;
         const expiresMs = toMs(expires);
         if (days) {
           const toleranceMs = 2 * 60 * 1000;
@@ -183,9 +191,9 @@ export default function PersonalCenterPage() {
           if (!purchasedMs) {
             const remainingMs = expiresMs ? Math.max(0, expiresMs - Date.now()) : 0;
             if (!expiresMs || remainingMs > maxRemainingMs) {
-              const nowMs = Date.now();
-              purchased = new Date(nowMs).toISOString();
-              expires = new Date(nowMs + days * 86400000).toISOString();
+              const baseMs = startOfDayCstMs(Date.now());
+              purchased = new Date(baseMs).toISOString();
+              expires = new Date(baseMs + days * 86400000).toISOString();
               localStorage.setItem('toptalk_plan_purchased', purchased);
               localStorage.setItem('toptalk_plan_expires', expires);
               localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: p, expireAt: expires }));
@@ -196,6 +204,11 @@ export default function PersonalCenterPage() {
               expires = new Date(expectedExpiresMs).toISOString();
               localStorage.setItem('toptalk_plan_expires', expires);
               localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: p, expireAt: expires }));
+            }
+            // purchasedAt 若不是“当天 00:00”，也统一写回（保证老用户按 0:00 起算）
+            if (purchasedMsRaw && purchasedMsRaw !== purchasedMs) {
+              purchased = new Date(purchasedMs).toISOString();
+              localStorage.setItem('toptalk_plan_purchased', purchased);
             }
           }
         }
@@ -210,11 +223,11 @@ export default function PersonalCenterPage() {
       try {
         const me = await accountMe();
         const nextPlan = (me?.plan || 'free').trim() || 'free';
-        const nextPurchasedAt = String(me?.planPurchasedAt || '');
-        const nextExpiresAt = String(me?.planExpiresAt || '');
+        let nextPurchasedAt = String(me?.planPurchasedAt || '').trim();
+        let nextExpiresAt = String(me?.planExpiresAt || '').trim();
 
-        // 后端 free / 空 → 清掉本地订阅缓存
-        if (nextPlan === 'free' || !nextExpiresAt) {
+        // 仅当服务端明确为 free 时清空本地订阅；有套餐但缺字段时合并本地/推算，避免全员「已过期」
+        if (nextPlan === 'free') {
           try {
             localStorage.setItem('toptalk_plan', 'free');
             localStorage.removeItem('toptalk_plan_purchased');
@@ -222,21 +235,32 @@ export default function PersonalCenterPage() {
             localStorage.removeItem('toptalk_subscription');
           } catch { /* ignore */ }
         } else {
+          if (!nextExpiresAt && nextPurchasedAt) {
+            const days = getPlanDays(nextPlan);
+            if (days) {
+              const pm = toMs(nextPurchasedAt);
+              if (pm) nextExpiresAt = new Date(pm + days * 86400000).toISOString();
+            }
+          }
+          if (!nextExpiresAt) nextExpiresAt = (localStorage.getItem('toptalk_plan_expires') || '').trim();
+          if (!nextPurchasedAt) nextPurchasedAt = (localStorage.getItem('toptalk_plan_purchased') || '').trim();
+
           try {
             localStorage.setItem('toptalk_plan', nextPlan);
             if (nextPurchasedAt) localStorage.setItem('toptalk_plan_purchased', nextPurchasedAt);
-            localStorage.setItem('toptalk_plan_expires', nextExpiresAt);
-            localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: nextPlan, expireAt: nextExpiresAt }));
+            if (nextExpiresAt) {
+              localStorage.setItem('toptalk_plan_expires', nextExpiresAt);
+              localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: nextPlan, expireAt: nextExpiresAt }));
+            }
           } catch { /* ignore */ }
         }
 
-        // 同步 user 信息（不影响登录态）
         try {
           const raw = localStorage.getItem('toptalk_user');
           const u = raw ? JSON.parse(raw) : {};
           u.plan = nextPlan;
-          u.planPurchasedAt = nextPurchasedAt;
-          u.planExpiresAt = nextExpiresAt;
+          if (nextPurchasedAt) u.planPurchasedAt = nextPurchasedAt;
+          if (nextExpiresAt) u.planExpiresAt = nextExpiresAt;
           localStorage.setItem('toptalk_user', JSON.stringify(u));
         } catch { /* ignore */ }
 
@@ -391,7 +415,16 @@ export default function PersonalCenterPage() {
                   {purchasedDate && (
                     <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3"><div className="text-gray-500 text-xs mb-1">开通时间</div><div className="text-white font-semibold text-sm">{purchasedDate}</div></div>
                   )}
-                  {planExpiresAt && remaining > 0 ? (
+                  {plan === 'single' ? (
+                    <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3">
+                      <div className="text-gray-500 text-xs mb-1">单次权益</div>
+                      <div className="text-yellow-400 font-bold text-sm leading-snug">
+                        {isSingleConsumedForCurrentPurchase()
+                          ? '已使用：创建过 1 个高级聊天室后，本次单次权益已消耗'
+                          : '未使用：可创建 1 个高级聊天室；创建后即消耗（不按自然日剩余天数显示）'}
+                      </div>
+                    </div>
+                  ) : planExpiresAt && remaining > 0 ? (
                     <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3"><div className="text-gray-500 text-xs mb-1">剩余有效期</div><div className="text-yellow-400 font-bold text-sm">{formatCountdown(remaining) || '即将到期'}</div></div>
                   ) : plan !== 'free' ? (
                     <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3"><div className="text-gray-500 text-xs mb-1">剩余有效期</div><div className="text-gray-400 font-semibold text-sm">已过期</div></div>

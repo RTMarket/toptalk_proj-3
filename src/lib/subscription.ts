@@ -21,6 +21,12 @@ function toMs(iso?: string | null): number | null {
   return Number.isFinite(t) ? t : null
 }
 
+/** 以中国时区（UTC+8）的“当天 00:00”作为计时起点 */
+function startOfDayCstMs(epochMs: number): number {
+  const offset = 8 * 3600 * 1000
+  return Math.floor((epochMs + offset) / 86400000) * 86400000 - offset
+}
+
 export async function syncSubscriptionFromApprovedOrder(email: string): Promise<void> {
   if (!SUPABASE_URL || !ANON_KEY) return
   const e = (email || '').trim()
@@ -50,7 +56,7 @@ export async function syncSubscriptionFromApprovedOrder(email: string): Promise<
 
     // 以订单通过时间（或创建时间）为准计算有效期。
     // 注意：对公转账渠道关闭后，这里主要用于兼容历史订单同步；不做“剩余时间叠加”，避免出现 58 天等超出套餐周期的展示。
-    const orderBaseMs = toMs(approvedAt) ?? toMs(createdAt) ?? Date.now()
+    const orderBaseMs = startOfDayCstMs(toMs(approvedAt) ?? toMs(createdAt) ?? Date.now())
     const localExpiresMs = toMs(localStorage.getItem('toptalk_plan_expires'))
 
     const purchasedAtIso = new Date(orderBaseMs).toISOString()
