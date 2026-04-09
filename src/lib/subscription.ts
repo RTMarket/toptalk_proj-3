@@ -49,16 +49,20 @@ export async function syncSubscriptionFromApprovedOrder(email: string): Promise<
     const days = PLAN_EXPIRY_DAYS[planId] ?? 30
 
     // 以订单通过时间为准，避免每次同步都把有效期“重置为满额”
-    const baseMs = toMs(approvedAt) ?? toMs(createdAt) ?? Date.now()
-    const purchasedAtIso = new Date(baseMs).toISOString()
-    const expiresAt = new Date(baseMs + days * 86400000).toISOString()
+    // 但如果用户在有效期内“续费/升级”，应当从当前到期时间往后顺延（不吞掉剩余时间）
+    const orderBaseMs = toMs(approvedAt) ?? toMs(createdAt) ?? Date.now()
+    const localExpiresMs = toMs(localStorage.getItem('toptalk_plan_expires'))
+    const carryOverBaseMs =
+      localExpiresMs && localExpiresMs > Date.now() ? Math.max(orderBaseMs, localExpiresMs) : orderBaseMs
+
+    const purchasedAtIso = new Date(orderBaseMs).toISOString()
+    const expiresAt = new Date(carryOverBaseMs + days * 86400000).toISOString()
 
     // 如果本地已有更新/更晚的套餐（例如邀请码兑换），不要被旧订单覆盖
     const localPurchasedMs = toMs(localStorage.getItem('toptalk_plan_purchased'))
-    const localExpiresMs = toMs(localStorage.getItem('toptalk_plan_expires'))
     const localPlan = localStorage.getItem('toptalk_plan') || 'free'
     const isLocalActive = !!localExpiresMs && localExpiresMs > Date.now()
-    const isOrderNewer = !localPurchasedMs || baseMs > localPurchasedMs
+    const isOrderNewer = !localPurchasedMs || orderBaseMs > localPurchasedMs
     if (isLocalActive && localPlan !== 'free' && !isOrderNewer) return
 
     localStorage.setItem('toptalk_plan', planId)
