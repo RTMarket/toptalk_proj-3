@@ -225,7 +225,7 @@ export default function PremiumChatRoom() {
 
   // ── 进房：拉取未过期的历史消息（后进用户可见仍在倒计时中的消息）──────────
   useEffect(() => {
-    if (!roomId || roomId === '------' || reloadLeave) return;
+    if (!supabaseConfigOk || !roomId || roomId === '------' || reloadLeave) return;
     let cancelled = false;
     void (async () => {
       const loaded = await fetchPremiumRoomMessagesFromDb(roomId, userIdRef.current);

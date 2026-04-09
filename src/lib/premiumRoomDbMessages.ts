@@ -107,7 +107,11 @@ export async function fetchPremiumRoomMessagesFromDb(
     .order('created_at', { ascending: true })
     .limit(300)
 
-  if (error || !data?.length) return []
+  if (error) {
+    console.warn('[premium messages] 拉取历史失败（常为 messages 表 RLS 未放行 SELECT）:', error.message)
+    return []
+  }
+  if (!data?.length) return []
 
   const nowMs = Date.now()
   const out: PremiumDbMessageShape[] = []
