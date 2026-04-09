@@ -15,6 +15,12 @@ const PLAN_EXPIRY_DAYS: Record<string, number> = {
   enterprise_pro: 30,
 }
 
+function toMs(iso?: string | null): number | null {
+  if (!iso) return null
+  const t = new Date(String(iso)).getTime()
+  return Number.isFinite(t) ? t : null
+}
+
 export async function syncSubscriptionFromApprovedOrder(email: string): Promise<void> {
   if (!SUPABASE_URL || !ANON_KEY) return
   const e = (email || '').trim()
@@ -34,20 +40,35 @@ export async function syncSubscriptionFromApprovedOrder(email: string): Promise<
     const data = await res.json().catch(() => ({}))
     if (!res.ok || !data?.success || !data?.order) return
 
-    const { plan_id: planId } = data.order as { plan_id?: string }
+    const { plan_id: planId, approved_at: approvedAt, created_at: createdAt } = data.order as {
+      plan_id?: string
+      approved_at?: string | null
+      created_at?: string | null
+    }
     if (!planId) return
-    const now = new Date()
     const days = PLAN_EXPIRY_DAYS[planId] ?? 30
-    const expiresAt = new Date(now.getTime() + days * 86400000).toISOString()
+
+    // 以订单通过时间为准，避免每次同步都把有效期“重置为满额”
+    const baseMs = toMs(approvedAt) ?? toMs(createdAt) ?? Date.now()
+    const purchasedAtIso = new Date(baseMs).toISOString()
+    const expiresAt = new Date(baseMs + days * 86400000).toISOString()
+
+    // 如果本地已有更新/更晚的套餐（例如邀请码兑换），不要被旧订单覆盖
+    const localPurchasedMs = toMs(localStorage.getItem('toptalk_plan_purchased'))
+    const localExpiresMs = toMs(localStorage.getItem('toptalk_plan_expires'))
+    const localPlan = localStorage.getItem('toptalk_plan') || 'free'
+    const isLocalActive = !!localExpiresMs && localExpiresMs > Date.now()
+    const isOrderNewer = !localPurchasedMs || baseMs > localPurchasedMs
+    if (isLocalActive && localPlan !== 'free' && !isOrderNewer) return
 
     localStorage.setItem('toptalk_plan', planId)
-    localStorage.setItem('toptalk_plan_purchased', now.toISOString())
+    localStorage.setItem('toptalk_plan_purchased', purchasedAtIso)
     localStorage.setItem('toptalk_plan_expires', expiresAt)
 
     const stored = localStorage.getItem('toptalk_user')
     const user = stored ? JSON.parse(stored) : {}
     user.plan = planId
-    user.planPurchasedAt = now.toISOString()
+    user.planPurchasedAt = purchasedAtIso
     user.planExpiresAt = expiresAt
     localStorage.setItem('toptalk_user', JSON.stringify(user))
 
