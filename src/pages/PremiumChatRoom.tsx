@@ -4,6 +4,14 @@ import { supabase } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
 import { postRoomEvent } from '../lib/accountApi';
 import { getActivePremiumRooms, removeActivePremiumRoom, upsertActivePremiumRoom } from '../lib/premiumActiveRooms';
+import { getPremiumRoomStorageBucket, uploadPremiumRoomFile } from '../lib/premiumRoomStorage';
+import {
+  deleteAllPremiumMessagesForRoom,
+  deletePremiumMessageRow,
+  fetchPremiumRoomMessagesFromDb,
+  persistPremiumFileMessage,
+  persistPremiumTextMessage,
+} from '../lib/premiumRoomDbMessages';
 
 interface Message {
   id: string;
@@ -98,6 +106,7 @@ export default function PremiumChatRoom() {
     file: File; url: string; name: string;
     size: string; mime: string; allowDownload: boolean;
   } | null>(null);
+  const [fileUploading, setFileUploading] = useState(false);
 
   // ── 读取昵称（用于消息展示/广播）────────────────────────
   useEffect(() => {
@@ -143,6 +152,29 @@ export default function PremiumChatRoom() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
+  // ── 进房：拉取未过期的历史消息（后进用户可见仍在倒计时中的消息）──────────
+  useEffect(() => {
+    if (!roomId || roomId === '------') return;
+    let cancelled = false;
+    void (async () => {
+      const loaded = await fetchPremiumRoomMessagesFromDb(roomId, userIdRef.current);
+      if (cancelled) return;
+      setMessages(prev => {
+        const system = prev.filter(m => m.sender === 'system');
+        const rest = prev.filter(m => m.sender !== 'system');
+        const seen = new Set(rest.map(m => m.id));
+        const toAdd = loaded.filter(m => !seen.has(m.id)).map(m => ({ ...m } as Message));
+        const combined = [...rest, ...toAdd].sort(
+          (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        );
+        return [...system, ...combined];
+      });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId]);
+
   // ── Supabase Realtime 订阅 ──────────────────────────
   useEffect(() => {
     const uid = userIdRef.current;
@@ -179,16 +211,18 @@ export default function PremiumChatRoom() {
       setOnlineCount(order.length > 0 ? order.length : 1);
     };
 
-    // 监听新消息广播（己方已通过 self:false 过滤；文本 sender 为对方 userId，文件为 'me'）
-    channel.on('broadcast', { event: 'new_message' }, ({ payload }) => {
-      try {
-        const msg = payload as Message;
-        if (!msg?.id || msg.sender === userIdRef.current) return;
-        setMessages(prev => {
-          if (prev.some(m => m.id === msg.id)) return prev;
-          return [...prev, msg];
-        });
-      } catch { /* ignore */ }
+    // 监听新消息广播（与即时聊天室一致；兼容 payload 在 .payload 或根上的两种形态）
+    channel.on('broadcast', { event: 'new_message' }, (raw: unknown) => {
+      const wrap = raw as { payload?: Message } | Message | null | undefined;
+      const msg = (wrap && typeof wrap === 'object' && 'payload' in wrap && wrap.payload
+        ? wrap.payload
+        : wrap) as Message | undefined;
+      if (!msg?.sender || msg.sender === userIdRef.current) return;
+      if (!msg.id) return;
+      setMessages(prev => {
+        if (prev.some(m => m.id === msg.id)) return prev;
+        return [...prev, msg];
+      });
     });
 
     channel.on('broadcast', { event: 'room_dissolved' }, () => {
@@ -200,12 +234,14 @@ export default function PremiumChatRoom() {
     channel.on('presence', { event: 'join' }, updatePresence);
     channel.on('presence', { event: 'leave' }, updatePresence);
 
-    channel.subscribe(status => {
+    channel.subscribe(async (status) => {
       if (status !== 'SUBSCRIBED') return;
-      channel
-        .track({ userId: uid, roomId, online_at: new Date().toISOString() })
-        .then(() => updatePresence())
-        .catch(() => updatePresence());
+      try {
+        await channel.track({ userId: uid, roomId, online_at: new Date().toISOString() });
+      } catch {
+        /* ignore */
+      }
+      updatePresence();
     });
 
     return () => {
@@ -224,14 +260,14 @@ export default function PremiumChatRoom() {
     return () => clearInterval(id);
   }, []);
 
-  // Room expired → overlay
+  // Room expired → overlay，并清空该房间在 DB 中的消息（阅后即焚不落库）
   useEffect(() => {
     if (roomLeft === 0) {
-      // 倒计时结束：从活跃列表移除
       try { removeActivePremiumRoom(roomId); } catch { /* ignore */ }
+      void deleteAllPremiumMessagesForRoom(roomId);
       setOverlayType('expired');
     }
-  }, [roomLeft]);
+  }, [roomLeft, roomId]);
 
   // Message expiration ticker
   useEffect(() => {
@@ -242,7 +278,15 @@ export default function PremiumChatRoom() {
         messages.forEach(m => { if (m.expireAt > 0) next[m.id] = Math.max(0, m.expireAt - now); });
         return next;
       });
-      setMessages(prev => prev.filter(m => m.expireAt === 0 || m.expireAt > now));
+      setMessages(prev => {
+        const next = prev.filter(m => m.expireAt === 0 || m.expireAt > now);
+        const removed = prev.filter(m => m.expireAt > 0 && m.expireAt <= now);
+        for (const m of removed) {
+          if (m.sender === 'system') continue;
+          void deletePremiumMessageRow(m.id);
+        }
+        return next;
+      });
     };
     tick();
     const id = setInterval(tick, 500);
@@ -270,6 +314,7 @@ export default function PremiumChatRoom() {
     } catch { /* ignore */ }
     // 更新 Supabase 房间状态为已解散（供其他用户查询）
     supabase.from('rooms').update({ status: 'dissolved' }).eq('id', roomId).then(() => {});
+    void deleteAllPremiumMessagesForRoom(roomId);
     // 2秒后跳转高级聊天室列表页
     setTimeout(() => window.location.replace('/rooms-premium'), 2100);
   };
@@ -293,45 +338,136 @@ export default function PremiumChatRoom() {
     setTimeout(() => { window.location.replace('/rooms-premium'); }, 2100);
   };
 
-  const handleSend = () => {
-    if (sendMode === 'text' && !inputText.trim()) return;
-    if (sendMode === 'file' && !pendingFile) return;
+  const handleSendFile = async () => {
+    if (!pendingFile || fileUploading) return;
+    const now = Date.now();
+    const myId = userIdRef.current;
+    const myName = nicknameRef.current || '用户';
+    const pf = pendingFile;
+
+    setFileUploading(true);
+    const result = await uploadPremiumRoomFile(roomId, pf.file);
+    setFileUploading(false);
+
+    if ('error' in result) {
+      const bucket = getPremiumRoomStorageBucket();
+      alert(
+        `文件上传失败：${result.error}\n\n` +
+          '说明：对方看到「请检查互联网连接」，是因为此前把仅本机可用的 blob 链接发给了别人。\n' +
+          `请先在 Supabase 创建 Storage 桶「${bucket}」并设为公开访问，且允许匿名上传（见控制台 Storage 策略）。`
+      );
+      return;
+    }
+
+    try { URL.revokeObjectURL(pf.url); } catch { /* ignore */ }
+
+    const persisted = await persistPremiumFileMessage({
+      roomId,
+      myId,
+      myName,
+      destroySeconds: msgDestroySeconds,
+      fileUrl: result.url,
+      fileName: pf.name,
+      fileSize: pf.size,
+      fileType: pf.mime,
+      allowDownload: pf.allowDownload,
+    });
+
+    let newMsg: Message;
+    if ('error' in persisted) {
+      console.warn('文件消息持久化失败:', persisted.error);
+      newMsg = {
+        id: `${now}_${myId}`,
+        type: 'file',
+        sender: myId,
+        senderName: myName,
+        fileName: pf.name,
+        fileUrl: result.url,
+        fileSize: pf.size,
+        fileType: pf.mime,
+        allowDownload: pf.allowDownload,
+        destroySeconds: msgDestroySeconds,
+        expireAt: msgDestroySeconds > 0 ? now + msgDestroySeconds * 1000 : 0,
+        createdAt: new Date(now).toISOString(),
+        isMine: true,
+      };
+    } else {
+      const createdMs = new Date(persisted.createdAt).getTime();
+      newMsg = {
+        id: persisted.id,
+        type: 'file',
+        sender: myId,
+        senderName: myName,
+        fileName: pf.name,
+        fileUrl: result.url,
+        fileSize: pf.size,
+        fileType: pf.mime,
+        allowDownload: pf.allowDownload,
+        destroySeconds: msgDestroySeconds,
+        expireAt: msgDestroySeconds > 0 ? createdMs + msgDestroySeconds * 1000 : 0,
+        createdAt: persisted.createdAt,
+        isMine: true,
+      };
+    }
+
+    setMessages(m => [...m, newMsg]);
+    setPendingFile(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+    void channelRef.current?.send({ type: 'broadcast', event: 'new_message', payload: newMsg });
+  };
+
+  const handleSend = async () => {
+    if (sendMode !== 'text') return;
+    const textBody = inputText.trim();
+    if (!textBody) return;
     const now = Date.now();
     const myId = userIdRef.current;
     const myName = nicknameRef.current || '用户';
 
-    if (sendMode === 'file' && pendingFile) {
-      const newMsg: Message = {
-        id: `${Date.now()}_${myId}`, type: 'file', sender: myId, senderName: myName,
-        fileName: pendingFile.name, fileUrl: pendingFile.url,
-        fileSize: pendingFile.size, fileType: pendingFile.mime,
-        allowDownload: pendingFile.allowDownload,
-        destroySeconds: msgDestroySeconds,
-        expireAt: msgDestroySeconds > 0 ? now + msgDestroySeconds * 1000 : 0,
-        createdAt: new Date(now).toISOString(), isMine: true,
-      };
-      setMessages(m => [...m, newMsg]);
-      setPendingFile(null);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-      channelRef.current?.send({ type: 'broadcast', event: 'new_message', payload: newMsg });
-      return;
-    }
-
-    const newMsg: Message = {
-      id: `${Date.now()}_${myId}`, type: 'text', sender: myId, senderName: myName,
-      text: inputText, allowDownload: false,
-      destroySeconds: msgDestroySeconds,
-      expireAt: msgDestroySeconds > 0 ? now + msgDestroySeconds * 1000 : 0,
-      createdAt: new Date(now).toISOString(), isMine: true,
-    };
-    setMessages(m => [...m, newMsg]);
     setInputText('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
-    channelRef.current?.send({ type: 'broadcast', event: 'new_message', payload: newMsg });
-    supabase.from('messages').insert({
-      room_id: `premium_${roomId}`, sender_id: myId, sender_name: myName,
-      type: 'text', content: inputText, destroy_seconds: msgDestroySeconds,
-    }).then(({ error }) => { if (error) console.warn('持久化失败:', error.message); });
+
+    const persisted = await persistPremiumTextMessage({
+      roomId,
+      myId,
+      myName,
+      textBody,
+      destroySeconds: msgDestroySeconds,
+    });
+
+    let newMsg: Message;
+    if ('error' in persisted) {
+      console.warn('文字消息持久化失败:', persisted.error);
+      newMsg = {
+        id: `${now}_${myId}`,
+        type: 'text',
+        sender: myId,
+        senderName: myName,
+        text: textBody,
+        allowDownload: false,
+        destroySeconds: msgDestroySeconds,
+        expireAt: msgDestroySeconds > 0 ? now + msgDestroySeconds * 1000 : 0,
+        createdAt: new Date(now).toISOString(),
+        isMine: true,
+      };
+    } else {
+      const createdMs = new Date(persisted.createdAt).getTime();
+      newMsg = {
+        id: persisted.id,
+        type: 'text',
+        sender: myId,
+        senderName: myName,
+        text: textBody,
+        allowDownload: false,
+        destroySeconds: msgDestroySeconds,
+        expireAt: msgDestroySeconds > 0 ? createdMs + msgDestroySeconds * 1000 : 0,
+        createdAt: persisted.createdAt,
+        isMine: true,
+      };
+    }
+
+    setMessages(m => [...m, newMsg]);
+    void channelRef.current?.send({ type: 'broadcast', event: 'new_message', payload: newMsg });
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -350,12 +486,28 @@ export default function PremiumChatRoom() {
     e.target.value = '';
   };
 
-  const handleDownload = (msg: Message) => {
-    if (msg.fileUrl && msg.fileUrl !== '#') {
+  const handleDownload = async (msg: Message) => {
+    const href = msg.fileUrl;
+    if (!href || href === '#') return;
+    if (href.startsWith('blob:')) {
       const a = document.createElement('a');
-      a.href = msg.fileUrl;
+      a.href = href;
       a.download = msg.fileName || 'file';
       a.click();
+      return;
+    }
+    try {
+      const res = await fetch(href, { mode: 'cors' });
+      if (!res.ok) throw new Error(String(res.status));
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = msg.fileName || 'file';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      window.open(href, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -377,6 +529,9 @@ export default function PremiumChatRoom() {
               <span className="text-gray-500 text-sm font-mono">#{roomId}</span>
               <span className="bg-orange-400/10 text-orange-400 text-xs px-2 py-0.5 rounded-full border border-orange-400/30 flex-shrink-0">
                 ⏱ {durationLabel}
+              </span>
+              <span className="bg-yellow-400/10 text-yellow-400 text-xs px-2 py-0.5 rounded-full border border-yellow-400/30 flex-shrink-0 tabular-nums">
+                剩余 {formatRemain(roomLeft * 1000)}
               </span>
               <span className="bg-amber-400/10 text-amber-400 text-xs px-2 py-0.5 rounded-full border border-amber-400/30 flex-shrink-0">高级</span>
             </div>
@@ -582,7 +737,7 @@ export default function PremiumChatRoom() {
                           </div>
                         )}
                         {msg.allowDownload ? (
-                          <button onClick={() => handleDownload(msg)}
+                          <button onClick={() => void handleDownload(msg)}
                             className="flex items-center justify-center gap-1.5 bg-white/10 hover:bg-white/15 text-gray-300 text-xs py-1.5 rounded-lg transition-colors w-full">
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
@@ -682,13 +837,18 @@ export default function PremiumChatRoom() {
                 t.style.height = 'auto';
                 t.style.height = Math.min(t.scrollHeight, 120) + 'px';
               }}
-              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void handleSend();
+                }
+              }}
               placeholder="输入消息，按 Enter 发送..."
               rows={1}
               className="flex-1 bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white text-sm placeholder-gray-700 focus:outline-none focus:border-amber-400/50 resize-none transition-colors leading-relaxed"
               style={{ minHeight: '44px', maxHeight: '120px' }}
             />
-            <button onClick={handleSend} disabled={!inputText.trim()}
+            <button onClick={() => void handleSend()} disabled={!inputText.trim()}
               className="bg-gradient-to-r from-amber-400 to-amber-500 text-[#1a365d] font-bold px-5 rounded-xl hover:from-amber-300 hover:to-amber-400 transition-all disabled:opacity-40 disabled:cursor-not-allowed text-sm flex-shrink-0 flex items-center gap1.5">
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
@@ -708,6 +868,7 @@ export default function PremiumChatRoom() {
               <span className="text-4xl">📎</span>
               <span>点击选择任意文件发送</span>
               <span className="text-xs text-gray-700">支持图片、文档、压缩包等（≤ 10MB）</span>
+              <span className="text-xs text-amber-400/70">发送时将上传到云端，对方才能下载（不再使用仅本机可用的链接）</span>
             </label>
           </div>
         )}
@@ -749,12 +910,12 @@ export default function PremiumChatRoom() {
             <div className="flex gap-2">
               <button onClick={() => setPendingFile(null)}
                 className="flex-1 border border-white/15 text-gray-400 hover:text-white py-2.5 rounded-xl text-sm transition-colors">取消</button>
-              <button onClick={handleSend}
-                className="flex-1 bg-gradient-to-r from-amber-400 to-amber-500 text-[#1a365d] font-bold py-2.5 rounded-xl text-sm hover:from-amber-300 hover:to-amber-400 transition-all flex items-center justify-center gap-1.5">
+              <button onClick={() => void handleSendFile()} disabled={fileUploading}
+                className="flex-1 bg-gradient-to-r from-amber-400 to-amber-500 text-[#1a365d] font-bold py-2.5 rounded-xl text-sm hover:from-amber-300 hover:to-amber-400 transition-all flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
                 </svg>
-                发送文件
+                {fileUploading ? '上传中…' : '发送文件'}
               </button>
             </div>
           </div>

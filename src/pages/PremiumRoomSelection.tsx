@@ -668,13 +668,6 @@ export default function PremiumRoomSelection() {
                         进入房间 →
                       </button>
                       <span className="text-gray-700 text-xs">{r.role === 'creator' ? '创建者' : '加入'}</span>
-                      <button
-                        onClick={() => { removeActivePremiumRoom(r.id); setActiveRooms(getActivePremiumRooms()); }}
-                        className="text-gray-600 text-xs hover:text-gray-400 transition-colors"
-                        type="button"
-                      >
-                        从活跃列表移除
-                      </button>
                     </div>
                   </div>
                 )
