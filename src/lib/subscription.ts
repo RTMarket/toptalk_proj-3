@@ -48,15 +48,13 @@ export async function syncSubscriptionFromApprovedOrder(email: string): Promise<
     if (!planId) return
     const days = PLAN_EXPIRY_DAYS[planId] ?? 30
 
-    // 以订单通过时间为准，避免每次同步都把有效期“重置为满额”
-    // 但如果用户在有效期内“续费/升级”，应当从当前到期时间往后顺延（不吞掉剩余时间）
+    // 以订单通过时间（或创建时间）为准计算有效期。
+    // 注意：对公转账渠道关闭后，这里主要用于兼容历史订单同步；不做“剩余时间叠加”，避免出现 58 天等超出套餐周期的展示。
     const orderBaseMs = toMs(approvedAt) ?? toMs(createdAt) ?? Date.now()
     const localExpiresMs = toMs(localStorage.getItem('toptalk_plan_expires'))
-    const carryOverBaseMs =
-      localExpiresMs && localExpiresMs > Date.now() ? Math.max(orderBaseMs, localExpiresMs) : orderBaseMs
 
     const purchasedAtIso = new Date(orderBaseMs).toISOString()
-    const expiresAt = new Date(carryOverBaseMs + days * 86400000).toISOString()
+    const expiresAt = new Date(orderBaseMs + days * 86400000).toISOString()
 
     // 如果本地已有更新/更晚的套餐（例如邀请码兑换），不要被旧订单覆盖
     const localPurchasedMs = toMs(localStorage.getItem('toptalk_plan_purchased'))
