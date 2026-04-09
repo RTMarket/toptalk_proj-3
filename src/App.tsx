@@ -16,6 +16,7 @@ import AdminLoginPage from './pages/AdminLoginPage'
 import ProtectedRoute from './components/auth/ProtectedRoute'
 import { useEffect } from 'react'
 import { syncSubscriptionFromApprovedOrder } from './lib/subscription'
+import InstallPrompt from './components/pwa/InstallPrompt'
 
 // 订阅同步逻辑已抽到 src/lib/subscription.ts，避免各页状态不一致
 
@@ -48,6 +49,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <InstallPrompt />
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/register" element={<RegisterPage />} />
