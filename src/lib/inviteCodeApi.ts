@@ -40,4 +40,3 @@ export async function redeemInviteCode(code: string): Promise<RedeemInviteResult
 
   return { planId, purchasedAt, expiresAt }
 }
-

@@ -292,37 +292,27 @@ export default function PersonalCenterPage() {
                     setInviteError('');
                     setInviteSuccess('');
                     try {
-                const r = await redeemInviteCode(inviteCode);
-                   const r = await redeemInviteCode(inviteCode);
-
-// 1. 先更新 localStorage（保持原有逻辑）
-localStorage.setItem('toptalk_plan', r.planId);
-localStorage.setItem('toptalk_plan_purchased', JSON.stringify({ planId: r.planId, purchasedAt: r.purchasedAt, expiresAt: r.expiresAt }));
-
-// 2. 【核心修复：直接更新页面 state，不依赖事件】立刻刷新页面
-setPlan(r.planId);
-setPlanPurchasedAt(r.purchasedAt || '');
-setPlanExpiresAt(r.expiresAt);
-
-// 3. 同步更新 user 状态（推荐，保持数据一致）
-setUser(prev => prev ? {
-  ...prev,
-  plan: r.planId,
-  planPurchasedAt: r.purchasedAt,
-  planExpiresAt: r.expiresAt
-} : prev);
-
-// 4. 同步更新 localStorage 里的 user 信息（保持原有逻辑）
-const u = JSON.parse(localStorage.getItem('toptalk_user') || '{}');
-u.planPurchasedAt = r.purchasedAt;
-u.planExpiresAt = r.expiresAt;
-u.plan = r.planId;
-localStorage.setItem('toptalk_user', JSON.stringify(u));
-
-// 5. 保留事件通知（兼容其他页面刷新，可选保留）
-window.dispatchEvent(new Event('storage'));
-window.dispatchEvent(new Event('toptalk_login'));
-
+                      const redeemResult = await redeemInviteCode(inviteCode);
+                      localStorage.setItem('toptalk_plan', redeemResult.planId);
+                      if (redeemResult.purchasedAt) localStorage.setItem('toptalk_plan_purchased', redeemResult.purchasedAt);
+                      localStorage.setItem('toptalk_plan_expires', redeemResult.expiresAt);
+                      localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: redeemResult.planId, expireAt: redeemResult.expiresAt }));
+                      // 立即更新本页状态（避免依赖 storage 事件导致显示不刷新）
+                      setPlan(redeemResult.planId)
+                      setPlanPurchasedAt(redeemResult.purchasedAt || '')
+                      setPlanExpiresAt(redeemResult.expiresAt)
+                      setUser(prev => prev ? { ...prev, plan: redeemResult.planId, planPurchasedAt: redeemResult.purchasedAt, planExpiresAt: redeemResult.expiresAt } : prev)
+                      // 同步 user 信息（不影响登录态）
+                      try {
+                        const raw = localStorage.getItem('toptalk_user');
+                        const u = raw ? JSON.parse(raw) : {};
+                        u.plan = redeemResult.planId;
+                        u.planPurchasedAt = redeemResult.purchasedAt;
+                        u.planExpiresAt = redeemResult.expiresAt;
+                        localStorage.setItem('toptalk_user', JSON.stringify(u));
+                      } catch { /* ignore */ }
+                      window.dispatchEvent(new Event('storage'));
+                      window.dispatchEvent(new Event('toptalk_login'));
                       setInviteCode('');
                       setInviteSuccess('兑换成功，套餐已开通');
                     } catch (e: unknown) {

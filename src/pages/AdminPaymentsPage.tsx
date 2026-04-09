@@ -4,7 +4,6 @@ import Navbar from '../components/layout/Navbar'
 import Footer from '../components/layout/Footer'
 import { pricingPlans } from '../data/pricingData'
 
-
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 
 type OrderStatus = 'pending' | 'approved' | 'rejected'
@@ -53,12 +52,7 @@ export default function AdminPaymentsPage() {
   const [usageErr, setUsageErr] = useState('')
   const [usageData, setUsageData] = useState<any | null>(null)
 
-  // ── Invite code generator ───────────────────────────────
-  const [invitePlanId, setInvitePlanId] = useState('monthly')
-  const [inviteQty, setInviteQty] = useState(10)
-  const [inviteLoading, setInviteLoading] = useState(false)
-  const [inviteErr, setInviteErr] = useState('')
-  
+  // 邀请码采用 Supabase SQL 预生成方式补货（见页面说明）
   useEffect(() => {
     const t = getAdminToken()
     if (!t) {
@@ -267,6 +261,34 @@ export default function AdminPaymentsPage() {
           </div>
         )}
 
+        {/* 邀请码（预生成/补货）说明 */}
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-5">
+          <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h2 className="text-white font-bold text-lg">邀请码（预生成方式）</h2>
+              <p className="text-gray-500 text-sm mt-1">
+                当前采用在 Supabase SQL Editor 中按套餐批量插入邀请码的方式补货；用户兑换成功后邀请码会被删除。
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4 bg-black/20 border border-white/10 rounded-xl p-4 text-xs text-gray-400 leading-relaxed">
+            <div className="mb-2 text-gray-300 font-medium">示例 SQL（每个套餐各生成 100 个）</div>
+            <pre className="whitespace-pre-wrap break-words">{`insert into public.invite_codes (code, plan_id)
+select substring(upper(md5(random()::text || clock_timestamp()::text)) from 1 for 6) as code,
+       p.plan_id
+from (
+  select 'single' as plan_id union all
+  select 'daily' union all
+  select 'weekly' union all
+  select 'monthly' union all
+  select 'enterprise' union all
+  select 'enterprise_pro'
+) p
+cross join generate_series(1, 120) g
+on conflict (code) do nothing;`}</pre>
+          </div>
+        </div>
 
         {/* 用户使用情况（按邮箱） */}
         <div className="bg-white/5 border border-white/10 rounded-2xl p-4 mb-5">
