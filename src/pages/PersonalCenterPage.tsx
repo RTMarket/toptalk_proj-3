@@ -33,7 +33,11 @@ function useCountdown(targetDate: string | null) {
   const [remaining, setRemaining] = useState<number>(0);
   useEffect(() => {
     if (!targetDate) { setRemaining(0); return; }
-    const calc = () => setRemaining(Math.max(0, Math.floor((new Date(targetDate).getTime() - Date.now()) / 1000)));
+    const calc = () => {
+      const t = new Date(String(targetDate)).getTime();
+      if (!Number.isFinite(t)) { setRemaining(0); return; }
+      setRemaining(Math.max(0, Math.floor((t - Date.now()) / 1000)));
+    };
     calc();
     const id = setInterval(calc, 1000);
     return () => clearInterval(id);
