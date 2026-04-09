@@ -112,11 +112,24 @@ export default function PersonalCenterPage() {
     const loadUser = () => {
       const stored = localStorage.getItem('toptalk_user');
       const p = localStorage.getItem('toptalk_plan') || 'free';
-      const purchased = localStorage.getItem('toptalk_plan_purchased') || '';
-      const expires = localStorage.getItem('toptalk_plan_expires') || '';
+      // 兼容多来源：toptalk_plan_* / toptalk_subscription / toptalk_user 字段
+      let purchased = localStorage.getItem('toptalk_plan_purchased') || '';
+      let expires = localStorage.getItem('toptalk_plan_expires') || '';
       if (stored) {
         try { setUser({ ...JSON.parse(stored), plan: p }); }
         catch { setUser({ nickname: stored, email: stored, plan: p }); }
+      }
+      try {
+        const u = stored ? JSON.parse(stored) : null;
+        if (!purchased) purchased = String(u?.planPurchasedAt || '');
+        if (!expires) expires = String(u?.planExpiresAt || '');
+      } catch { /* ignore */ }
+      if (!expires) {
+        try {
+          const subRaw = localStorage.getItem('toptalk_subscription');
+          const sub = subRaw ? JSON.parse(subRaw) : null;
+          expires = String(sub?.expireAt || sub?.expiresAt || '');
+        } catch { /* ignore */ }
       }
       setPlan(p); setPlanPurchasedAt(purchased); setPlanExpiresAt(expires);
     };
