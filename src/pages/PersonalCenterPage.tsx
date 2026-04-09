@@ -54,9 +54,10 @@ function formatCountdown(s: number) {
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
-  if (d > 0) return `${d}天 ${h}小时 ${m}分钟`;
-  if (h > 0) return `${h}小时 ${m}分钟`;
-  return `${m}分钟 ${s % 60}秒`;
+  const sec = s % 60;
+  if (d > 0) return `${d}天 ${h}小时 ${m}分钟 ${sec}秒`;
+  if (h > 0) return `${h}小时 ${m}分钟 ${sec}秒`;
+  return `${m}分钟 ${sec}秒`;
 }
 
 function toMs(iso?: string | null): number | null {
