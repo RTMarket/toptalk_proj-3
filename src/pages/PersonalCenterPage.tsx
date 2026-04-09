@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import Navbar from '../components/layout/Navbar';
 import Footer from '../components/layout/Footer';
 import { pricingPlans } from '../data/pricingData';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { clampNickname, isValidNickname, NICKNAME_MAX_LEN } from '../lib/nickname';
 import { isValidInviteCode, normalizeInviteCode, redeemInviteCode } from '../lib/inviteCodeApi';
 
@@ -74,7 +74,7 @@ function getPlanDays(planId: string): number | null {
   }
 }
 
-type Tab = 'subscription' | 'profile' | 'security';
+type Tab = 'subscription' | 'upgrade' | 'profile' | 'security';
 
 // Password input with eye toggle
 function PwdInput({ id, label, value, onChange, placeholder, error, maxLength }: {
@@ -115,7 +115,9 @@ function PwdInput({ id, label, value, onChange, placeholder, error, maxLength }:
 }
 
 export default function PersonalCenterPage() {
-  const [activeTab, setActiveTab] = useState<Tab>('subscription');
+  const [searchParams] = useSearchParams();
+  const initialTab = (searchParams.get('tab') || '').trim() as Tab;
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab || 'subscription');
 
   const [user, setUser] = useState<{ nickname: string; email: string; plan: string; password?: string; planPurchasedAt?: string; planExpiresAt?: string } | null>(null);
   const [plan, setPlan] = useState('free');
@@ -282,9 +284,17 @@ export default function PersonalCenterPage() {
 
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: 'subscription', label: '订阅套餐', icon: '💎' },
+    { id: 'upgrade', label: '升级套餐', icon: '💳' },
     { id: 'profile', label: '个人资料', icon: '👤' },
     { id: 'security', label: '账户安全', icon: '🔒' },
   ];
+
+  useEffect(() => {
+    const t = (searchParams.get('tab') || '').trim() as Tab;
+    if (!t) return;
+    if (tabs.some(x => x.id === t)) setActiveTab(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams.toString()]);
 
   return (
     <div className="min-h-screen bg-[#050d1a] text-white">
@@ -413,126 +423,31 @@ export default function PersonalCenterPage() {
                 说明：邀请码兑换需要后端已部署 `account/redeem-invite` 接口。
               </p>
             </div>
+          </div>
+        )}
 
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
-              <h3 className="text-white font-semibold mb-4">所有套餐一览</h3>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                {pricingPlans.map(p => (
-                  <div key={p.id} className={`rounded-xl p-4 border transition-all ${plan === p.id ? 'bg-yellow-400/10 border-yellow-400/40' : 'bg-white/3 border-white/10 hover:border-white/20'}`}>
-                    <div className={`text-xs px-2 py-0.5 rounded-full w-fit mb-2 border ${planBadgeColors[p.id] || 'bg-white/5 text-gray-400 border-white/10'}`}>{p.name}</div>
-                    <div className="text-lg font-bold text-white">{typeof p.price === 'number' ? `¥${p.price}` : p.price}</div>
-                    <div className="text-gray-600 text-xs mt-0.5">{p.duration}</div>
-                    {plan === p.id && <div className="mt-2 text-yellow-400 text-xs font-medium">当前使用中</div>}
-                  </div>
-                ))}
+        {/* ═══ Upgrade Tab ═══ */}
+        {activeTab === 'upgrade' && (
+          <div className="space-y-6 animate-fadeIn">
+            <div className="bg-white/5 border border-white/10 rounded-3xl p-8">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <h2 className="text-xl font-bold text-white mb-1">升级套餐</h2>
+                  <p className="text-gray-500 text-sm">查看 6 个订阅套餐详情。开通方式：在“订阅套餐”页签输入邀请码即可立即生效。</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('subscription')}
+                  className="bg-yellow-400/15 hover:bg-yellow-400/20 border border-yellow-400/25 text-yellow-300 font-semibold px-4 py-2 rounded-xl text-sm"
+                >
+                  去输入邀请码 →
+                </button>
               </div>
             </div>
-          </div>
-        )}
 
-        {/* ═══ Profile Tab ═══ */}
-        {activeTab === 'profile' && (
-          <div className="animate-fadeIn">
-            <div className="bg-white/5 border border-white/10 rounded-3xl p-8 max-w-2xl">
-              <h2 className="text-xl font-bold text-white mb-6">个人资料</h2>
-              {profileSuccess && (
-                <div className="mb-5 flex items-center gap-3 bg-green-500/15 border border-green-500/30 text-green-400 rounded-xl px-4 py-3 text-sm">✅ 个人资料已保存！</div>
-              )}
-              <form onSubmit={handleSaveProfile} className="space-y-5">
-                <div className="flex items-center gap-5 mb-6">
-                  <div className="w-16 h-16 rounded-full bg-gradient-to-br from-yellow-400/40 to-yellow-600/40 flex items-center justify-center text-white text-2xl font-bold">{nickname?.[0]?.toUpperCase() || 'U'}</div>
-                  <div><div className="text-white font-semibold">{nickname || '未设置昵称'}</div><div className="text-gray-500 text-sm">{user.email}</div></div>
-                </div>
-                <div>
-                  <label className="block text-gray-400 text-sm font-medium mb-2">注册邮箱</label>
-                  <input type="email" value={user.email} readOnly className="w-full bg-white/5 border border-white/10 rounded-xl px-5 py-3.5 text-gray-500 text-base cursor-not-allowed" />
-                  <p className="text-gray-700 text-xs mt-1.5">邮箱地址不可修改，如需更换请联系客服</p>
-                </div>
-                <div>
-                  <label className="block text-gray-300 text-sm font-medium mb-2">昵称</label>
-                  <input type="text" value={nickname} onChange={e => { setProfileNicknameError(''); setNickname(clampNickname(e.target.value)); }} placeholder={`最多 ${NICKNAME_MAX_LEN} 个字符（汉字、英文、数字均可）`}
-                    className={`w-full bg-white/5 border ${profileNicknameError ? 'border-red-500/50' : 'border-white/15'} rounded-xl px-5 py-3.5 text-white text-base placeholder-gray-600 focus:outline-none focus:border-yellow-400/50 transition-colors`} />
-                  <p className="text-gray-600 text-xs mt-1.5">不超过 {NICKNAME_MAX_LEN} 个字符</p>
-                  {profileNicknameError && <p className="text-red-400 text-sm mt-2">{profileNicknameError}</p>}
-                </div>
-                <div>
-                  <label className="block text-gray-400 text-sm font-medium mb-2">当前套餐</label>
-                  <div className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm font-medium ${planBadgeColors[plan] || 'bg-white/5 text-gray-400 border-white/10'}`}>{planLabels[plan] || plan}</div>
-                </div>
-                <button type="submit" disabled={profileSaving}
-                  className="w-full bg-gradient-to-r from-yellow-400 to-yellow-500 text-[#1a365d] font-bold py-3.5 rounded-xl text-base hover:from-yellow-300 hover:to-yellow-400 transition-all disabled:opacity-60 disabled:cursor-not-allowed shadow-lg shadow-yellow-500/20">
-                  {profileSaving ? '保存中...' : '保存修改'}
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {/* ═══ Security Tab ═══ */}
-        {activeTab === 'security' && (
-          <div className="animate-fadeIn">
-            {pwdSuccess && (
-              <div className="mb-6 flex items-center gap-3 bg-green-500/15 border border-green-500/30 text-green-400 rounded-xl px-4 py-3 text-sm">✅ 密码修改成功！</div>
-            )}
-
-            <div className="bg-white/5 border border-white/10 rounded-3xl p-8 max-w-2xl mb-6">
-              <h2 className="text-xl font-bold text-white mb-1">修改密码</h2>
-              <p className="text-gray-500 text-sm mb-6">
-                请输入新密码并确认，即可完成修改
-              </p>
-
-              <form onSubmit={handleResetPassword} className="space-y-5">
-                {/* 新密码 */}
-                <PwdInput
-                  id="newPwd"
-                  label="新密码"
-                  value={pwdForm.newPwd}
-                  onChange={v => setPwdForm({ ...pwdForm, newPwd: v })}
-                  placeholder="8位，字母/数字/组合均可"
-                  error={pwdErrors.newPwd}
-                  maxLength={8}
-                />
-
-                {/* 确认新密码 */}
-                <PwdInput
-                  id="confirmPwd"
-                  label="确认新密码"
-                  value={pwdForm.confirmPwd}
-                  onChange={v => setPwdForm({ ...pwdForm, confirmPwd: v })}
-                  placeholder="再次输入新密码"
-                  error={pwdErrors.confirmPwd}
-                  maxLength={8}
-                />
-
-                <button type="submit" disabled={pwdLoading}
-                  className="w-full bg-gradient-to-r from-yellow-400 to-yellow-500 text-[#1a365d] font-bold py-3.5 rounded-xl text-base hover:from-yellow-300 hover:to-yellow-400 transition-all disabled:opacity-60 disabled:cursor-not-allowed shadow-lg shadow-yellow-500/20">
-                  {pwdLoading ? '提交中...' : '确认修改密码'}
-                </button>
-              </form>
-            </div>
-
-            {/* 安全建议 */}
-            <div className="bg-white/5 border border-white/10 rounded-2xl p-6 max-w-2xl">
-              <h3 className="text-white font-semibold mb-4">安全建议</h3>
-              <ul className="space-y-3">
-                {[
-                  '密码必须为8位，字母/数字/组合均可，不支持特殊字符',
-                  '定期更换密码，建议每3个月更换一次',
-                  '不要在公共电脑上保存密码',
-                  '如果怀疑账户被盗，请立即修改密码',
-                ].map((tip, i) => (
-                  <li key={i} className="flex items-start gap-3 text-gray-400 text-sm">
-                    <span className="text-yellow-400 mt-0.5">✓</span>{tip}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        )}
-      </div>
-      <Footer />
-      <style>{`@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } } .animate-fadeIn { animation: fadeIn 0.3s ease-out; }`}</style>
-    </div>
-  );
-}
-
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+              <h3 className="text-white font-semibold mb-4">6个订阅套餐一览</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {pricingPlans.filter(p => p.id !== 'free').map(p => (
+                  <div
+                    key={p.id}
