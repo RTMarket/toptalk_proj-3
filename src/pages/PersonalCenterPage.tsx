@@ -55,6 +55,25 @@ function formatCountdown(s: number) {
   return `${m}分钟 ${s % 60}秒`;
 }
 
+function toMs(iso?: string | null): number | null {
+  if (!iso) return null;
+  const t = new Date(String(iso)).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+function getPlanDays(planId: string): number | null {
+  switch (planId) {
+    case 'daily': return 1;
+    case 'weekly': return 7;
+    case 'monthly': return 30;
+    case 'enterprise': return 30;
+    case 'enterprise_pro': return 30;
+    // 单次高级：不按时间过期，给一个很长的展示有效期（由高级聊天室“单次消耗”逻辑控制）
+    case 'single': return 3650;
+    default: return null;
+  }
+}
+
 type Tab = 'subscription' | 'profile' | 'security';
 
 // Password input with eye toggle
@@ -131,6 +150,29 @@ export default function PersonalCenterPage() {
           expires = String(sub?.expireAt || sub?.expiresAt || '');
         } catch { /* ignore */ }
       }
+
+      // 规则 A：不叠加（到期时间始终=生效时间+套餐天数）
+      // 如果本地缓存出现异常（例如显示 58 天），在个人中心做一次校准并写回 localStorage
+      try {
+        const days = getPlanDays(p);
+        const purchasedMs = toMs(purchased);
+        const expiresMs = toMs(expires);
+        if (days && purchasedMs) {
+          const expectedExpiresMs = purchasedMs + days * 86400000;
+          // 允许少量误差（时区/写入时差）
+          const toleranceMs = 2 * 60 * 1000;
+          if (!expiresMs) {
+            expires = new Date(expectedExpiresMs).toISOString();
+            localStorage.setItem('toptalk_plan_expires', expires);
+            localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: p, expireAt: expires }));
+          } else if (expiresMs > expectedExpiresMs + toleranceMs || expiresMs < expectedExpiresMs - toleranceMs) {
+            expires = new Date(expectedExpiresMs).toISOString();
+            localStorage.setItem('toptalk_plan_expires', expires);
+            localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: p, expireAt: expires }));
+          }
+        }
+      } catch { /* ignore */ }
+
       setPlan(p); setPlanPurchasedAt(purchased); setPlanExpiresAt(expires);
     };
     loadUser();
