@@ -277,9 +277,9 @@ export default function PersonalCenterPage() {
                   <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3"><div className="text-gray-500 text-xs mb-1">房间数量</div><div className="text-white font-semibold text-sm">{currentPlanData?.roomCount || 1}个</div></div>
                 </div>
                 <div className="mt-6">
-                  <Link to="/payment" className="inline-flex items-center gap-2 bg-gradient-to-r from-yellow-400 to-yellow-500 text-[#1a365d] font-bold py-3 px-6 rounded-xl text-sm hover:from-yellow-300 hover:to-yellow-400 transition-all shadow-lg shadow-yellow-500/20">
-                    {plan === 'free' ? '🚀 开通高级套餐' : '⬆️ 升级套餐'}
-                  </Link>
+                  <div className="inline-flex items-center gap-2 bg-white/5 border border-white/10 text-gray-300 font-semibold py-3 px-6 rounded-xl text-sm">
+                    🎟️ 套餐通过邀请码开通（见下方“邀请码开通套餐”）
+                  </div>
                 </div>
               </div>
             </div>

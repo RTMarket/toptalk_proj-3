@@ -48,7 +48,7 @@ export default function AdminPaymentsPage() {
   const navigate = useNavigate()
   const [adminToken, setAdminToken] = useState('')
   const [status, setStatus] = useState<OrderStatus>('pending')
-  const [panel, setPanel] = useState<'bank' | 'invite'>('bank')
+  const [panel, setPanel] = useState<'invite'>('invite')
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
   const [info, setInfo] = useState('')
@@ -153,11 +153,8 @@ export default function AdminPaymentsPage() {
 
   useEffect(() => {
     if (!canQuery) return
-    if (panel === 'bank') fetchOrders()
-    else {
-      void fetchInviteInventory()
-      void fetchInviteRedemptions()
-    }
+    void fetchInviteInventory()
+    void fetchInviteRedemptions()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, adminToken, panel])
 
@@ -274,8 +271,8 @@ export default function AdminPaymentsPage() {
             <button
               type="button"
               onClick={() => {
-                if (panel === 'bank') fetchOrders()
-                else { void fetchInviteInventory(); void fetchInviteRedemptions() }
+                void fetchInviteInventory();
+                void fetchInviteRedemptions();
               }}
               disabled={loading || inviteLoading}
               className="bg-yellow-400 hover:bg-yellow-300 text-[#1a365d] font-bold px-5 py-2.5 rounded-xl text-sm disabled:opacity-60"
@@ -293,44 +290,9 @@ export default function AdminPaymentsPage() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 mb-4">
-          {([
-            { id: 'bank', label: '转账订单审核' },
-            { id: 'invite', label: '邀请码兑换统计' },
-          ] as const).map(t => (
-            <button
-              key={t.id}
-              onClick={() => setPanel(t.id)}
-              className={`px-4 py-2 rounded-xl text-sm border transition-colors ${
-                panel === t.id
-                  ? 'bg-yellow-400/15 text-yellow-300 border-yellow-400/30'
-                  : 'bg-white/5 text-gray-400 border-white/10 hover:text-white hover:border-white/20'
-              }`}
-            >
-              {t.label}
-            </button>
-          ))}
-
-          {panel === 'bank' && (
-            <div className="flex items-center gap-2 max-w-full overflow-x-auto">
-              {([
-                { id: 'pending', label: '待审核' },
-                { id: 'approved', label: '已通过' },
-                { id: 'rejected', label: '已拒绝' },
-              ] as const).map(t => (
-                <button
-                  key={t.id}
-                  onClick={() => setStatus(t.id)}
-                  className={`px-4 py-2 rounded-xl text-sm border transition-colors ${
-                    status === t.id
-                      ? 'bg-yellow-400/15 text-yellow-300 border-yellow-400/30'
-                      : 'bg-white/5 text-gray-400 border-white/10 hover:text-white hover:border-white/20'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-          )}
+          <div className="px-4 py-2 rounded-xl text-sm border bg-yellow-400/15 text-yellow-300 border-yellow-400/30">
+            邀请码兑换统计
+          </div>
         </div>
 
         {info && (
@@ -345,8 +307,7 @@ export default function AdminPaymentsPage() {
           </div>
         )}
 
-        {panel === 'invite' && (
-          <div className="space-y-5">
+        <div className="space-y-5">
             {inviteErr && (
               <div className="bg-red-900/30 border border-red-500/40 rounded-xl p-4 text-red-400 text-sm">
                 ❌ {inviteErr}
@@ -427,183 +388,8 @@ export default function AdminPaymentsPage() {
               </div>
             </div>
           </div>
-        )}
 
-        {/* 用户使用情况（按邮箱） */}
-        {panel === 'bank' && (
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-4 mb-5">
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex-1 min-w-[240px]">
-              <div className="text-gray-500 text-xs mb-1">用户邮箱</div>
-              <input
-                value={usageEmail}
-                onChange={e => setUsageEmail(e.target.value)}
-                placeholder="例如：user@example.com"
-                className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-white text-sm placeholder-gray-600 focus:outline-none focus:border-yellow-400/50"
-              />
-            </div>
-            <button
-              type="button"
-              onClick={() => fetchUsage(usageEmail)}
-              disabled={usageLoading || !usageEmail.trim()}
-              className="bg-white/10 hover:bg-white/15 border border-white/15 text-white px-4 py-2.5 rounded-xl text-sm disabled:opacity-60"
-            >
-              {usageLoading ? '查询中...' : '查询使用情况'}
-            </button>
-          </div>
-          {usageErr && <div className="mt-3 text-sm text-red-400">❌ {usageErr}</div>}
-          {usageData && (
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-              <div className="bg-white/3 border border-white/10 rounded-xl p-4">
-                <div className="text-gray-500 text-xs mb-2">套餐信息（最近一次通过）</div>
-                <div className="text-white font-semibold">{usageData?.lastApprovedOrder?.plan_name || '—'}</div>
-                <div className="text-gray-600 text-xs mt-1">
-                  审核通过：{formatTime(usageData?.lastApprovedOrder?.approved_at)}
-                </div>
-              </div>
-              <div className="bg-white/3 border border-white/10 rounded-xl p-4">
-                <div className="text-gray-500 text-xs mb-2">高级聊天室使用</div>
-                <div className="text-gray-200">创建次数：<span className="text-yellow-400 font-semibold">{usageData?.usage?.premiumCreates ?? 0}</span></div>
-                <div className="text-gray-200">进入次数：<span className="text-yellow-400 font-semibold">{usageData?.usage?.premiumEnters ?? 0}</span></div>
-              </div>
-              <div className="bg-white/3 border border-white/10 rounded-xl p-4">
-                <div className="text-gray-500 text-xs mb-2">即时聊天室使用</div>
-                <div className="text-gray-200">创建次数：<span className="text-yellow-400 font-semibold">{usageData?.usage?.instantCreates ?? 0}</span></div>
-                <div className="text-gray-200">进入次数：<span className="text-yellow-400 font-semibold">{usageData?.usage?.instantEnters ?? 0}</span></div>
-                <div className="text-gray-600 text-xs mt-1">参与房间数：{usageData?.usage?.participatedRooms ?? 0}</div>
-              </div>
-            </div>
-          )}
-        </div>
-        )}
-
-        {panel === 'bank' && (
-        <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
-          <div className="w-full overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="bg-white/5">
-              <tr className="border-b border-white/10">
-                {['订单号', '邮箱', '昵称', '套餐', '金额', '时间', '凭证', '操作'].map(h => (
-                  <th key={h} className="text-left px-5 py-3 text-gray-500 text-xs font-medium">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map(o => (
-                <tr key={String(o.id)} className="border-b border-white/5 last:border-0 hover:bg-white/3">
-                  <td className="px-5 py-3.5 text-gray-300 font-mono">{o.order_no}</td>
-                  <td className="px-5 py-3.5 text-gray-300">{o.user_email}</td>
-                  <td className="px-5 py-3.5 text-gray-400">{o.user_nickname || '—'}</td>
-                  <td className="px-5 py-3.5 text-gray-200">{o.plan_name}</td>
-                  <td className="px-5 py-3.5 text-yellow-400 font-semibold">¥{o.amount}</td>
-                  <td className="px-5 py-3.5 text-gray-500">{formatTime(o.created_at)}</td>
-                  <td className="px-5 py-3.5">
-                    {o.bank_transfer_screenshot_url ? (
-                      <button
-                        type="button"
-                        onClick={() => setSelected(o)}
-                        className="text-blue-400 hover:text-blue-300 underline underline-offset-2"
-                      >
-                        查看
-                      </button>
-                    ) : (
-                      <span className="text-gray-600">—</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    {status === 'pending' ? (
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => act(o, 'approve')}
-                          disabled={loading}
-                          className="bg-green-500/20 hover:bg-green-500/30 border border-green-500/30 text-green-300 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-60"
-                        >
-                          通过
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setRejectTarget(o); setRejectRemark('') }}
-                          disabled={loading}
-                          className="bg-red-500/20 hover:bg-red-500/30 border border-red-500/30 text-red-300 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-60"
-                        >
-                          拒绝
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => { setUsageEmail(o.user_email); fetchUsage(o.user_email) }}
-                          disabled={loading}
-                          className="bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-60"
-                        >
-                          使用情况
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteTarget(o)}
-                          disabled={loading}
-                          className="bg-white/5 hover:bg-white/10 border border-white/10 text-red-300 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-60"
-                        >
-                          删除
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => { setUsageEmail(o.user_email); fetchUsage(o.user_email) }}
-                          disabled={loading}
-                          className="bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-60"
-                        >
-                          使用情况
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setDeleteTarget(o)}
-                          disabled={loading}
-                          className="bg-white/5 hover:bg-white/10 border border-white/10 text-red-300 px-3 py-1.5 rounded-lg text-xs font-bold disabled:opacity-60"
-                        >
-                          删除
-                        </button>
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {orders.length === 0 && (
-                <tr>
-                  <td colSpan={8} className="px-5 py-10 text-center text-gray-600">
-                    {loading ? '加载中...' : '暂无数据'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-          </div>
-        </div>
-        )}
-
-        {panel === 'bank' && selected?.bank_transfer_screenshot_url && (
-          <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSelected(null)}>
-            <div className="max-w-3xl w-full bg-[#0b1730] border border-white/10 rounded-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
-              <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">
-                <div className="text-white font-semibold text-sm">支付凭证预览</div>
-                <button type="button" className="text-gray-500 hover:text-white" onClick={() => setSelected(null)}>✕</button>
-              </div>
-              <div className="p-5">
-                <img
-                  src={selected.bank_transfer_screenshot_url}
-                  alt="支付凭证"
-                  className="w-full max-h-[70vh] object-contain rounded-xl bg-black/30"
-                />
-                <div className="mt-4 text-xs text-gray-500">
-                  {selected.user_email} · {selected.plan_name} · ¥{selected.amount}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
+        {/* 对公转账已关闭：不再展示审核相关模块 */}
 
         {rejectTarget && (
           <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setRejectTarget(null)}>

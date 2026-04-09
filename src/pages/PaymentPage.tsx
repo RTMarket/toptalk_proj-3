@@ -22,6 +22,42 @@ const PLAN_DAYS: Record<string, number> = {
 }
 
 export default function PaymentPage() {
+  // 已关闭：对公转账渠道下线，改为邀请码开通
+  return (
+    <div className="min-h-screen bg-[#050d1a] text-white">
+      <Navbar />
+      <div className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 sm:pt-28 pb-16">
+        <div className="bg-white/5 border border-white/10 rounded-3xl p-8">
+          <div className="text-5xl mb-4">🎟️</div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-white mb-2">对公转账已关闭</h1>
+          <p className="text-gray-500 text-sm leading-relaxed">
+            目前套餐开通统一通过<b className="text-gray-300">邀请码</b>方式完成。请联系管理员购买邀请码后，在个人中心输入即可立即开通。
+          </p>
+
+          <div className="mt-6 flex flex-col sm:flex-row gap-3">
+            <a
+              href="/personal-center"
+              className="inline-flex items-center justify-center gap-2 bg-gradient-to-r from-yellow-400 to-yellow-500 text-[#1a365d] font-bold py-3 px-6 rounded-xl text-sm hover:from-yellow-300 hover:to-yellow-400 transition-all shadow-lg shadow-yellow-500/20"
+            >
+              进入个人中心兑换邀请码 →
+            </a>
+            <a
+              href="/rooms"
+              className="inline-flex items-center justify-center gap-2 bg-white/10 hover:bg-white/15 border border-white/15 text-white font-semibold py-3 px-6 rounded-xl text-sm"
+            >
+              返回聊天室
+            </a>
+          </div>
+
+          <div className="mt-5 text-gray-700 text-xs">
+            提示：如需移除桌面图标，请在手机桌面长按删除。
+          </div>
+        </div>
+      </div>
+      <Footer />
+    </div>
+  )
+
   const [step, setStep] = useState<'select' | 'fill' | 'upload' | 'done'>('select')
   const [selectedPlanId, setSelectedPlanId] = useState('monthly')
   const [email, setEmail] = useState('')

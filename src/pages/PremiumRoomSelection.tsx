@@ -84,7 +84,9 @@ function PricingModal({ onClose }: { onClose: () => void }) {
   const paidPlans = pricingPlans.filter(p => p.id !== 'free');
 
   const handleSubscribe = (planId: string) => {
-    navigate('/payment?plan=' + planId);
+    // 对公转账已关闭：改为邀请码开通
+    onClose();
+    navigate('/personal-center');
   };
 
   return (

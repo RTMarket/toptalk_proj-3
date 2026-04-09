@@ -198,9 +198,9 @@ export default function AdminOrdersPage() {
                   )}
 
                   <div className="mt-6 flex flex-wrap gap-3">
-                    <Link to="/payment"
+                    <Link to="/personal-center"
                       className="bg-gradient-to-r from-yellow-400 to-yellow-500 text-[#1a365d] font-semibold px-5 py-2.5 rounded-lg text-sm hover:from-yellow-300 hover:to-yellow-400 transition-all">
-                      {expired ? '立即续费' : (isPremium ? '续费/升级套餐' : '升级套餐')}
+                      {expired ? '去兑换邀请码' : (isPremium ? '去兑换邀请码' : '去兑换邀请码')}
                     </Link>
                     <button className="border border-white/20 text-white font-medium px-5 py-2.5 rounded-lg text-sm hover:bg-white/5 transition-colors">
                       修改密码
