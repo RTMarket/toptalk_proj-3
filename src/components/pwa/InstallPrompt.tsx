@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>
@@ -31,22 +32,27 @@ function isSafariIOS(): boolean {
   return isIOS() && isWebKit && !isCriOS && !isFxiOS
 }
 
-const DISMISS_KEY = 'toptalk_install_prompt_dismissed_v1'
+const DISMISS_KEY_DEFAULT = 'toptalk_install_prompt_dismissed_v1'
+const DISMISS_KEY_ADMIN = 'toptalk_install_prompt_dismissed_admin_v1'
 
 export default function InstallPrompt() {
+  const location = useLocation()
   const [bipEvent, setBipEvent] = useState<BeforeInstallPromptEvent | null>(null)
   const [visible, setVisible] = useState(false)
   const [installing, setInstalling] = useState(false)
+
+  const isAdmin = location.pathname.startsWith('/admin')
+  const dismissKey = isAdmin ? DISMISS_KEY_ADMIN : DISMISS_KEY_DEFAULT
 
   const eligible = useMemo(() => {
     if (typeof window === 'undefined') return false
     if (!isProbablyMobile()) return false
     if (isStandalone()) return false
     try {
-      if (localStorage.getItem(DISMISS_KEY) === '1') return false
+      if (localStorage.getItem(dismissKey) === '1') return false
     } catch { /* ignore */ }
     return true
-  }, [])
+  }, [dismissKey])
 
   useEffect(() => {
     if (!eligible) return
@@ -82,7 +88,7 @@ export default function InstallPrompt() {
   const dismiss = (persist: boolean) => {
     setVisible(false)
     if (persist) {
-      try { localStorage.setItem(DISMISS_KEY, '1') } catch { /* ignore */ }
+      try { localStorage.setItem(dismissKey, '1') } catch { /* ignore */ }
     }
   }
 
