@@ -60,7 +60,8 @@ export async function syncSubscriptionFromApprovedOrder(email: string): Promise<
     const localExpiresMs = toMs(localStorage.getItem('toptalk_plan_expires'))
 
     const purchasedAtIso = new Date(orderBaseMs).toISOString()
-    const expiresAt = new Date(orderBaseMs + days * 86400000).toISOString()
+    // 有效期到“最后一天 23:59:59”（含当天）
+    const expiresAt = new Date(orderBaseMs + days * 86400000 - 1000).toISOString()
 
     // 如果本地已有更新/更晚的套餐（例如邀请码兑换），不要被旧订单覆盖
     const localPurchasedMs = toMs(localStorage.getItem('toptalk_plan_purchased'))

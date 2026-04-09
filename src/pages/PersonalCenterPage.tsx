@@ -38,7 +38,8 @@ function useCountdown(targetDate: string | null) {
     const calc = () => {
       const t = new Date(String(targetDate)).getTime();
       if (!Number.isFinite(t)) { setRemaining(0); return; }
-      setRemaining(Math.max(0, Math.floor((t - Date.now()) / 1000)));
+      // 用 ceil，避免出现「29天0小时」这类边界展示（分钟/秒要算进倒计时）
+      setRemaining(Math.max(0, Math.ceil((t - Date.now()) / 1000)));
     };
     calc();
     const id = setInterval(calc, 1000);
@@ -52,7 +53,7 @@ function formatCountdown(s: number) {
   const d = Math.floor(s / 86400);
   const h = Math.floor((s % 86400) / 3600);
   const m = Math.floor((s % 3600) / 60);
-  if (d > 0) return `${d}天 ${h}小时`;
+  if (d > 0) return `${d}天 ${h}小时 ${m}分钟`;
   if (h > 0) return `${h}小时 ${m}分钟`;
   return `${m}分钟 ${s % 60}秒`;
 }
@@ -67,6 +68,11 @@ function toMs(iso?: string | null): number | null {
 function startOfDayCstMs(epochMs: number): number {
   const offset = 8 * 60 * 60 * 1000;
   return Math.floor((epochMs + offset) / 86400000) * 86400000 - offset;
+}
+
+/** 对按天计时的套餐：有效期到“最后一天 23:59:59”（含当天），更符合用户认知 */
+function endOfDayExpiryMsFromStartCst(startMs: number, days: number): number {
+  return startMs + days * 86400000 - 1000;
 }
 
 /** 按自然日计时的套餐周期（天）。单次高级不按天展示/校准，由「创建房间」消耗逻辑控制。 */
@@ -193,13 +199,13 @@ export default function PersonalCenterPage() {
             if (!expiresMs || remainingMs > maxRemainingMs) {
               const baseMs = startOfDayCstMs(Date.now());
               purchased = new Date(baseMs).toISOString();
-              expires = new Date(baseMs + days * 86400000).toISOString();
+              expires = new Date(endOfDayExpiryMsFromStartCst(baseMs, days)).toISOString();
               localStorage.setItem('toptalk_plan_purchased', purchased);
               localStorage.setItem('toptalk_plan_expires', expires);
               localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: p, expireAt: expires }));
             }
           } else {
-            const expectedExpiresMs = purchasedMs + days * 86400000;
+            const expectedExpiresMs = endOfDayExpiryMsFromStartCst(purchasedMs, days);
             if (!expiresMs || expiresMs > expectedExpiresMs + toleranceMs || expiresMs < expectedExpiresMs - toleranceMs) {
               expires = new Date(expectedExpiresMs).toISOString();
               localStorage.setItem('toptalk_plan_expires', expires);
@@ -239,7 +245,10 @@ export default function PersonalCenterPage() {
             const days = getPlanDays(nextPlan);
             if (days) {
               const pm = toMs(nextPurchasedAt);
-              if (pm) nextExpiresAt = new Date(pm + days * 86400000).toISOString();
+              if (pm) {
+                const baseMs = startOfDayCstMs(pm);
+                nextExpiresAt = new Date(endOfDayExpiryMsFromStartCst(baseMs, days)).toISOString();
+              }
             }
           }
           if (!nextExpiresAt) nextExpiresAt = (localStorage.getItem('toptalk_plan_expires') || '').trim();

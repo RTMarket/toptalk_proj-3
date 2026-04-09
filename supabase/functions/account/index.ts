@@ -302,7 +302,8 @@ async function handleRedeemInvite(req: Request) {
   const nowMs = Date.now()
   const baseMs = startOfDayCstMs(nowMs)
   const purchasedAt = new Date(baseMs).toISOString()
-  const expiresAt = new Date(baseMs + days * 86400000).toISOString()
+  // 有效期到“最后一天 23:59:59”（含当天）
+  const expiresAt = new Date(baseMs + days * 86400000 - 1000).toISOString()
 
   const { error: upErr } = await supabaseAdmin
     .from('app_users')
