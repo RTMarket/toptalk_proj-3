@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { supabase, supabaseConfigHint, supabaseConfigOk } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
 import { postRoomEvent } from '../lib/accountApi';
-import { isNavigationReload } from '../lib/roomConstants';
+import { isNavigationReload, isRoomWallClockExpired } from '../lib/roomConstants';
 import { getActivePremiumRooms, removeActivePremiumRoom, upsertActivePremiumRoom } from '../lib/premiumActiveRooms';
 import { getPremiumRoomStorageBucket, uploadPremiumRoomFile } from '../lib/premiumRoomStorage';
 import {
@@ -350,13 +350,14 @@ export default function PremiumChatRoom() {
     return () => window.clearInterval(id);
   }, [roomMeta]);
 
-  // Room expired → overlay，并清空该房间在 DB 中的消息（阅后即焚不落库）
+  // Room expired → overlay。墙钟判断；已弹出「已结束」后勿重复删库
   useEffect(() => {
-    if (!roomMeta || roomLeft > 0) return;
+    if (!roomMeta || !isRoomWallClockExpired(roomMeta)) return;
+    if (overlayType === 'expired') return;
     try { removeActivePremiumRoom(roomId); } catch { /* ignore */ }
     void deleteAllPremiumMessagesForRoom(roomId);
     setOverlayType('expired');
-  }, [roomLeft, roomId, roomMeta]);
+  }, [roomLeft, roomId, roomMeta, overlayType]);
 
   // Message expiration ticker
   useEffect(() => {

@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { supabase, supabaseConfigHint, supabaseConfigOk } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
 import { postRoomEvent } from '../lib/accountApi';
-import { INSTANT_ROOM_SECONDS, isNavigationReload } from '../lib/roomConstants';
+import { INSTANT_ROOM_SECONDS, isNavigationReload, isRoomWallClockExpired } from '../lib/roomConstants';
 
 interface Message {
   id: string;
@@ -176,14 +176,15 @@ export default function FreeChatRoom() {
     return () => window.clearInterval(id);
   }, [roomMeta]);
 
-  // 房间时间到 → 结束（与解散不同：自然到期）
+  // 房间时间到 → 结束（与解散不同：自然到期）。必须用墙钟判断；已弹出「已结束」后勿重复执行
   useEffect(() => {
-    if (!roomMeta || roomLeft > 0) return;
+    if (!roomMeta || !isRoomWallClockExpired(roomMeta)) return;
+    if (overlay === 'expired') return;
     try {
       localStorage.removeItem('toptalk_active_room');
     } catch { /* ignore */ }
     setOverlay('expired');
-  }, [roomLeft, roomMeta]);
+  }, [roomLeft, roomMeta, overlay]);
 
   // 关闭/离开页面：也算离开房间，并释放“活跃即时房间”占用
   useEffect(() => {
@@ -436,7 +437,7 @@ export default function FreeChatRoom() {
     setTimeout(() => { window.location.href = '/rooms'; }, 2000);
   };
 
-  const isRoomExpired = !!roomMeta && roomLeft <= 0;
+  const isRoomExpired = !!roomMeta && isRoomWallClockExpired(roomMeta);
   const roomM = Math.floor(roomLeft / 60);
   const roomS = roomLeft % 60;
 
