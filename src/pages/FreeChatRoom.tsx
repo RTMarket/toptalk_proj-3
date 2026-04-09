@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase, supabaseConfigHint, supabaseConfigOk } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
 import { postRoomEvent } from '../lib/accountApi';
+import { INSTANT_ROOM_SECONDS, isNavigationReload } from '../lib/roomConstants';
 
 interface Message {
   id: string;
@@ -72,15 +73,32 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   );
 }
 
+function applyInstantChatLeaveOnReload(roomId: string) {
+  try {
+    const activeRaw = localStorage.getItem('toptalk_active_room');
+    if (activeRaw) {
+      const active = JSON.parse(activeRaw);
+      if (active?.id === roomId) localStorage.removeItem('toptalk_active_room');
+    }
+    const leftRooms: Record<string, string> = JSON.parse(localStorage.getItem('toptalk_left') || '{}');
+    leftRooms[roomId] = new Date().toISOString();
+    localStorage.setItem('toptalk_left', JSON.stringify(leftRooms));
+  } catch { /* ignore */ }
+  postRoomEvent({ roomId, roomType: 'instant', event: 'leave' }).catch(() => {});
+}
+
 export default function FreeChatRoom() {
   const [searchParams] = useSearchParams();
   const roomId = searchParams.get('roomId') || '——';
-  const roomDestroy = parseInt(searchParams.get('destroy') || '900');
+
+  const reloadLeave = useMemo(() => isNavigationReload(), []);
 
   const [rtStatus, setRtStatus] = useState<'connecting' | 'ready' | 'failed'>('connecting');
 
   const [overlay, setOverlay] = useState<string | null>(null);
-  const [roomLeft, setRoomLeft] = useState(roomDestroy);
+  /** 房间剩余秒数：始终以「创建者创建时间 + 15 分钟」为准，与 URL 参数无关 */
+  const [roomLeft, setRoomLeft] = useState(0);
+  const [roomMeta, setRoomMeta] = useState<{ createdAt: string; destroySeconds: number } | null>(null);
   const [messages, setMessages] = useState<Message[]>(mockMessages);
   const [msgTimes, setMsgTimes] = useState<Record<string, number>>({});
   const [inputText, setInputText] = useState('');
@@ -98,34 +116,78 @@ export default function FreeChatRoom() {
   const nicknameRef = useRef('匿名用户');
   const [userOrder, setUserOrder] = useState<string[]>([]);
 
-  // Supabase env 未配置时：直接提示（否则会出现“能发送但彼此看不到”的假象）
-  if (!supabaseConfigOk) {
-    return (
-      <div className="min-h-screen bg-[#050d1a] text-white">
-        <Navbar />
-        <div className="max-w-xl mx-auto px-4 sm:px-6 pt-28 pb-16">
-          <div className="bg-red-900/20 border border-red-500/30 rounded-3xl p-6">
-            <div className="text-red-300 font-bold text-lg mb-2">聊天室暂不可用</div>
-            <div className="text-gray-400 text-sm leading-relaxed">{supabaseConfigHint}</div>
-            <div className="mt-4 text-gray-600 text-xs">（这不是你的操作问题，是部署环境变量缺失/错误导致。）</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // 刷新页面 = 离开房间（与点「离开」同等本地规则），然后回列表
+  useLayoutEffect(() => {
+    if (!roomId || roomId === '——' || !reloadLeave) return;
+    applyInstantChatLeaveOnReload(roomId);
+    window.location.replace('/rooms');
+  }, [roomId, reloadLeave]);
 
-  // 统计：进入/离开房间（不影响聊天功能，失败忽略）
+  // 统计：进入房间（刷新离开时不计为进入）
   useEffect(() => {
-    if (!roomId || roomId === '——') return;
+    if (!supabaseConfigOk || !roomId || roomId === '——' || reloadLeave) return;
     postRoomEvent({ roomId, roomType: 'instant', event: 'enter' }).catch(() => {});
     return () => {
+      if (reloadLeave) return;
       postRoomEvent({ roomId, roomType: 'instant', event: 'leave' }).catch(() => {});
     };
-  }, [roomId]);
+  }, [roomId, reloadLeave]);
+
+  // 拉取房间创建时间：即时房固定 15 分钟，所有人倒计时一致
+  useEffect(() => {
+    if (!supabaseConfigOk || !roomId || roomId === '——' || reloadLeave) return;
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase
+        .from('rooms')
+        .select('created_at')
+        .eq('id', roomId)
+        .eq('room_type', 'instant')
+        .maybeSingle();
+      if (cancelled) return;
+      if (data?.created_at) {
+        setRoomMeta({ createdAt: String(data.created_at), destroySeconds: INSTANT_ROOM_SECONDS });
+        return;
+      }
+      try {
+        const raw: { id: string; type: string; createdAt: string }[] = JSON.parse(
+          localStorage.getItem('toptalk_rooms') || '[]'
+        );
+        const r = raw.find(x => x.id === roomId && x.type === 'free');
+        if (r?.createdAt) setRoomMeta({ createdAt: r.createdAt, destroySeconds: INSTANT_ROOM_SECONDS });
+      } catch { /* ignore */ }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, reloadLeave]);
+
+  // 房间倒计时：created_at + 15 分钟（与谁加入、是否刷新 URL 无关）
+  useEffect(() => {
+    if (!roomMeta) return;
+    const tick = () => {
+      const createdMs = new Date(roomMeta.createdAt).getTime();
+      const totalMs = Math.max(0, roomMeta.destroySeconds * 1000);
+      const remainMs = Math.max(0, createdMs + totalMs - Date.now());
+      setRoomLeft(Math.ceil(remainMs / 1000));
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [roomMeta]);
+
+  // 房间时间到 → 结束（与解散不同：自然到期）
+  useEffect(() => {
+    if (!roomMeta || roomLeft > 0) return;
+    try {
+      localStorage.removeItem('toptalk_active_room');
+    } catch { /* ignore */ }
+    setOverlay('expired');
+  }, [roomLeft, roomMeta]);
 
   // 关闭/离开页面：也算离开房间，并释放“活跃即时房间”占用
   useEffect(() => {
-    if (!roomId || roomId === '——') return;
+    if (!supabaseConfigOk || !roomId || roomId === '——' || reloadLeave) return;
     const release = () => {
       try {
         const raw = localStorage.getItem('toptalk_active_room');
@@ -139,7 +201,7 @@ export default function FreeChatRoom() {
     };
     window.addEventListener('pagehide', release);
     return () => window.removeEventListener('pagehide', release);
-  }, [roomId]);
+  }, [roomId, reloadLeave]);
 
   // ── 读取昵称 ────────────────────────────────────────
   useEffect(() => {
@@ -156,6 +218,7 @@ export default function FreeChatRoom() {
 
   // ── Supabase Realtime：广播消息 + Presence 在线人数（跨设备一致） ──
   useEffect(() => {
+    if (!supabaseConfigOk || !roomId || roomId === '——' || reloadLeave) return;
     const uid = userIdRef.current;
     const channel = supabase.channel(`free_room_${roomId}`, {
       config: {
@@ -231,19 +294,21 @@ export default function FreeChatRoom() {
         channel.unsubscribe();
       } catch { /* ignore */ }
     };
-  }, [roomId]);
+  }, [roomId, reloadLeave]);
 
   // 如果长时间没订阅成功，提示用户（网络/Realtime 异常）
   useEffect(() => {
+    if (!supabaseConfigOk || reloadLeave) return;
     setRtStatus('connecting');
     const t = window.setTimeout(() => {
       setRtStatus(s => (s === 'ready' ? s : 'failed'));
     }, 6000);
     return () => window.clearTimeout(t);
-  }, [roomId]);
+  }, [roomId, reloadLeave]);
 
   // ── 进入房间权限检查 ─────────────────────────────────
   useEffect(() => {
+    if (reloadLeave) return;
     const dissolved: string[] = JSON.parse(localStorage.getItem('toptalk_dissolved') || '[]');
     if (dissolved.includes(roomId)) { window.location.href = '/rooms'; return; }
 
@@ -265,18 +330,7 @@ export default function FreeChatRoom() {
         } catch {}
       })();
     }
-  }, []);
-
-  // ── 房间倒计时 ─────────────────────────────────────
-  useEffect(() => {
-    const id = setInterval(() => {
-      setRoomLeft(l => {
-        if (l <= 1) { clearInterval(id); setOverlay('expired'); return 0; }
-        return l - 1;
-      });
-    }, 1000);
-    return () => clearInterval(id);
-  }, []);
+  }, [reloadLeave]);
 
   // ── 消息过期检测 ────────────────────────────────────
   useEffect(() => {
@@ -382,9 +436,28 @@ export default function FreeChatRoom() {
     setTimeout(() => { window.location.href = '/rooms'; }, 2000);
   };
 
-  const isRoomExpired = roomLeft === 0;
+  const isRoomExpired = !!roomMeta && roomLeft <= 0;
   const roomM = Math.floor(roomLeft / 60);
   const roomS = roomLeft % 60;
+
+  if (!supabaseConfigOk) {
+    return (
+      <div className="min-h-screen bg-[#050d1a] text-white">
+        <Navbar />
+        <div className="max-w-xl mx-auto px-4 sm:px-6 pt-28 pb-16">
+          <div className="bg-red-900/20 border border-red-500/30 rounded-3xl p-6">
+            <div className="text-red-300 font-bold text-lg mb-2">聊天室暂不可用</div>
+            <div className="text-gray-400 text-sm leading-relaxed">{supabaseConfigHint}</div>
+            <div className="mt-4 text-gray-600 text-xs">（这不是你的操作问题，是部署环境变量缺失/错误导致。）</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (reloadLeave) {
+    return <div className="min-h-screen bg-[#050d1a]" />;
+  }
 
   return (
     <div className="min-h-screen bg-[#050d1a] text-white flex flex-col">
@@ -401,12 +474,17 @@ export default function FreeChatRoom() {
             <div className="flex items-center gap-3 flex-wrap">
               <div className="w-8 h-8 rounded-lg bg-yellow-400/15 border border-yellow-400/25 flex items-center justify-center text-sm flex-shrink-0">💬</div>
               <div className="flex flex-col gap-0.5">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="text-yellow-400 font-bold text-xs">#{roomId}</span>
                   <span className="text-gray-600 text-xs">· 即时聊天室</span>
+                  <span className="bg-orange-400/10 text-orange-400 text-[10px] px-2 py-0.5 rounded-full border border-orange-400/25">固定 15 分钟</span>
                 </div>
                 <span className="text-gray-600 text-xs">
-                  {isRoomExpired ? '已结束' : `剩余 ${roomM}分${roomS.toString().padStart(2,'0')}秒`}
+                  {!roomMeta
+                    ? '正在同步创建者房间时间…'
+                    : isRoomExpired
+                      ? '房间已结束'
+                      : `创建者房间倒计时 · 剩余 ${roomM}分${roomS.toString().padStart(2, '0')}秒`}
                 </span>
               </div>
             </div>

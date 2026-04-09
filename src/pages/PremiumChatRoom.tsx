@@ -1,8 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { supabase, supabaseConfigHint, supabaseConfigOk } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
 import { postRoomEvent } from '../lib/accountApi';
+import { isNavigationReload } from '../lib/roomConstants';
 import { getActivePremiumRooms, removeActivePremiumRoom, upsertActivePremiumRoom } from '../lib/premiumActiveRooms';
 import { getPremiumRoomStorageBucket, uploadPremiumRoomFile } from '../lib/premiumRoomStorage';
 import {
@@ -78,6 +79,18 @@ function durationLabelFromSeconds(seconds: number): string {
   return `${s}秒`;
 }
 
+function applyPremiumLeaveOnReload(roomId: string, amICreator: boolean) {
+  try {
+    removeActivePremiumRoom(roomId);
+    if (!amICreator) {
+      const leftRooms: Record<string, number> = JSON.parse(localStorage.getItem('toptalk_left') || '{}');
+      leftRooms[roomId] = Date.now();
+      localStorage.setItem('toptalk_left', JSON.stringify(leftRooms));
+    }
+  } catch { /* ignore */ }
+  postRoomEvent({ roomId, roomType: 'premium', event: 'leave' }).catch(() => {});
+}
+
 function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4" onClick={onClose}>
@@ -99,7 +112,7 @@ export default function PremiumChatRoom() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [roomLeft, setRoomLeft] = useState(destroyParam);
+  const [roomLeft, setRoomLeft] = useState(0);
   const [roomMeta, setRoomMeta] = useState<{ createdAt: string; destroySeconds: number } | null>(null);
   const [onlineCount, setOnlineCount] = useState(1);
   const userIdRef = useRef(`u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
@@ -126,21 +139,7 @@ export default function PremiumChatRoom() {
   } | null>(null);
   const [fileUploading, setFileUploading] = useState(false);
 
-  // Supabase env 未配置时：直接提示（否则会出现“能发送但彼此看不到”的假象）
-  if (!supabaseConfigOk) {
-    return (
-      <div className="min-h-screen bg-[#050d1a] text-white">
-        <Navbar />
-        <div className="max-w-xl mx-auto px-4 sm:px-6 pt-28 pb-16">
-          <div className="bg-red-900/20 border border-red-500/30 rounded-3xl p-6">
-            <div className="text-red-300 font-bold text-lg mb-2">聊天室暂不可用</div>
-            <div className="text-gray-400 text-sm leading-relaxed">{supabaseConfigHint}</div>
-            <div className="mt-4 text-gray-600 text-xs">（这不是你的操作问题，是部署环境变量缺失/错误导致。）</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  const reloadLeave = useMemo(() => isNavigationReload(), []);
 
   // ── 读取昵称（用于消息展示/广播）────────────────────────
   useEffect(() => {
@@ -163,69 +162,70 @@ export default function PremiumChatRoom() {
     } catch { return false; }
   })();
 
-  // 统计：进入/离开房间（不影响聊天功能，失败忽略）
+  // 刷新页面 = 离开房间，回列表（与点「离开」同等本地规则）
+  useLayoutEffect(() => {
+    if (!roomId || roomId === '------' || !reloadLeave) return;
+    applyPremiumLeaveOnReload(roomId, amICreator);
+    window.location.replace('/rooms-premium');
+  }, [roomId, reloadLeave, amICreator]);
+
+  // 始终以 Supabase rooms.created_at + destroy_seconds 为唯一倒计时来源；再同步本地活跃列表
   useEffect(() => {
-    if (!roomId || roomId === '------') return;
-    postRoomEvent({ roomId, roomType: 'premium', event: 'enter' }).catch(() => {});
-    // 标记为活跃房间（加入也算）
-    const nowIso = new Date().toISOString();
-    const existing = getActivePremiumRooms().find(r => r.id === roomId);
-    upsertActivePremiumRoom({
-      id: roomId,
-      // 创建者离开再进入时，沿用原 createdAt，避免倒计时被重置
-      createdAt: existing?.createdAt || nowIso,
-      destroySeconds: destroyParam,
-      // 若之前已以“加入者”身份进入过该房间（activeRooms 里 role=member），不要被本地 created_rooms 误判覆盖
-      role: existing?.role === 'member' ? 'member' : (amICreator ? 'creator' : 'member'),
-      password: searchParams.get('password') || undefined,
-    });
+    if (!supabaseConfigOk || !roomId || roomId === '------' || reloadLeave) return;
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase
+        .from('rooms')
+        .select('created_at, destroy_seconds, status')
+        .eq('id', roomId)
+        .eq('room_type', 'premium')
+        .maybeSingle();
+      if (cancelled) return;
+      if (data?.created_at) {
+        if (String((data as { status?: string }).status || '') === 'dissolved') {
+          window.location.replace('/rooms-premium');
+          return;
+        }
+        const createdAt = String((data as { created_at: string }).created_at);
+        const ds = Number((data as { destroy_seconds?: number }).destroy_seconds) || destroyParam || 3600;
+        setRoomMeta({ createdAt, destroySeconds: ds });
+        upsertActivePremiumRoom({
+          id: roomId,
+          createdAt,
+          destroySeconds: ds,
+          role: amICreator ? 'creator' : 'member',
+          password: searchParams.get('password') || undefined,
+        });
+      } else {
+        const local = getActivePremiumRooms().find(r => r.id === roomId);
+        if (local?.createdAt) {
+          const ds = Number(local.destroySeconds) || destroyParam || 3600;
+          setRoomMeta({ createdAt: local.createdAt, destroySeconds: ds });
+          upsertActivePremiumRoom({
+            id: roomId,
+            createdAt: local.createdAt,
+            destroySeconds: ds,
+            role: amICreator ? 'creator' : 'member',
+            password: searchParams.get('password') || undefined,
+          });
+        }
+      }
+      postRoomEvent({ roomId, roomType: 'premium', event: 'enter' }).catch(() => {});
+    })();
     return () => {
+      if (reloadLeave) return;
       postRoomEvent({ roomId, roomType: 'premium', event: 'leave' }).catch(() => {});
-      // 只要该房间在活跃列表中的 role 为 member，就视为“加入者离开”并释放
       try {
         const cur = getActivePremiumRooms().find(r => r.id === roomId);
         if (cur?.role === 'member') removeActivePremiumRoom(roomId);
       } catch { /* ignore */ }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId]);
-
-  // ── 房间元数据：按“创建时间 + 创建时长”计算剩余倒计时（加入者后进不应被重置）────────
-  useEffect(() => {
-    if (!roomId || roomId === '------') return;
-    let cancelled = false;
-    void (async () => {
-      // 1) 优先使用本地活跃房间记录（PremiumRoomSelection 已保证加入时读取 created_at / destroy_seconds）
-      try {
-        const local = getActivePremiumRooms().find(r => r.id === roomId);
-        if (local?.createdAt && Number.isFinite(local.destroySeconds)) {
-          if (!cancelled) setRoomMeta({ createdAt: local.createdAt, destroySeconds: Number(local.destroySeconds) || destroyParam || 0 });
-          return;
-        }
-      } catch { /* ignore */ }
-
-      // 2) fallback：从 Supabase rooms 表读取（避免本地缺失时倒计时错误）
-      try {
-        const { data } = await supabase
-          .from('rooms')
-          .select('created_at, destroy_seconds')
-          .eq('id', roomId)
-          .eq('room_type', 'premium')
-          .maybeSingle();
-        const createdAt = (data as any)?.created_at as string | undefined;
-        const destroySeconds = Number((data as any)?.destroy_seconds);
-        if (!cancelled && createdAt) {
-          setRoomMeta({ createdAt, destroySeconds: Number.isFinite(destroySeconds) && destroySeconds > 0 ? destroySeconds : (destroyParam || 0) });
-        }
-      } catch { /* ignore */ }
-    })();
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId]);
+  }, [roomId, reloadLeave, amICreator, destroyParam]);
 
   // ── 进房：拉取未过期的历史消息（后进用户可见仍在倒计时中的消息）──────────
   useEffect(() => {
-    if (!roomId || roomId === '------') return;
+    if (!roomId || roomId === '------' || reloadLeave) return;
     let cancelled = false;
     void (async () => {
       const loaded = await fetchPremiumRoomMessagesFromDb(roomId, userIdRef.current);
@@ -248,6 +248,7 @@ export default function PremiumChatRoom() {
 
   // ── Supabase Realtime 订阅 ──────────────────────────
   useEffect(() => {
+    if (!supabaseConfigOk || !roomId || roomId === '------' || reloadLeave) return;
     const uid = userIdRef.current;
     const channel = supabase.channel(`premium_room_${roomId}`, {
       config: {
@@ -324,15 +325,16 @@ export default function PremiumChatRoom() {
       } catch { /* ignore */ }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId]);
+  }, [roomId, reloadLeave]);
 
   useEffect(() => {
+    if (!supabaseConfigOk || reloadLeave) return;
     setRtStatus('connecting');
     const t = window.setTimeout(() => {
       setRtStatus(s => (s === 'ready' ? s : 'failed'));
     }, 6000);
     return () => window.clearTimeout(t);
-  }, [roomId]);
+  }, [roomId, reloadLeave]);
 
   // Room countdown（以“创建时间”为基准计算，保证所有加入者看到一致的剩余时间）
   useEffect(() => {
@@ -350,12 +352,11 @@ export default function PremiumChatRoom() {
 
   // Room expired → overlay，并清空该房间在 DB 中的消息（阅后即焚不落库）
   useEffect(() => {
-    if (roomLeft === 0) {
-      try { removeActivePremiumRoom(roomId); } catch { /* ignore */ }
-      void deleteAllPremiumMessagesForRoom(roomId);
-      setOverlayType('expired');
-    }
-  }, [roomLeft, roomId]);
+    if (!roomMeta || roomLeft > 0) return;
+    try { removeActivePremiumRoom(roomId); } catch { /* ignore */ }
+    void deleteAllPremiumMessagesForRoom(roomId);
+    setOverlayType('expired');
+  }, [roomLeft, roomId, roomMeta]);
 
   // Message expiration ticker
   useEffect(() => {
@@ -428,7 +429,7 @@ export default function PremiumChatRoom() {
 
   // 离开网页/关闭标签页：也算离开房间（加入者需释放活跃占用）
   useEffect(() => {
-    if (!roomId || roomId === '------') return;
+    if (!roomId || roomId === '------' || reloadLeave) return;
     const release = () => {
       try {
         const cur = getActivePremiumRooms().find(r => r.id === roomId);
@@ -440,7 +441,7 @@ export default function PremiumChatRoom() {
     };
     window.addEventListener('pagehide', release);
     return () => window.removeEventListener('pagehide', release);
-  }, [roomId]);
+  }, [roomId, reloadLeave]);
 
   const handleSendFile = async () => {
     if (!pendingFile || fileUploading) return;
@@ -455,10 +456,17 @@ export default function PremiumChatRoom() {
 
     if ('error' in result) {
       const bucket = getPremiumRoomStorageBucket();
+      const err = String(result.error || '');
+      const rls = err.toLowerCase().includes('row-level security') || err.includes('RLS');
       alert(
-        `文件上传失败：${result.error}\n\n` +
-          '说明：对方看到「请检查互联网连接」，是因为此前把仅本机可用的 blob 链接发给了别人。\n' +
-          `请先在 Supabase 创建 Storage 桶「${bucket}」并设为公开访问，且允许匿名上传（见控制台 Storage 策略）。`
+        rls
+          ? `文件上传失败：${err}\n\n` +
+              '【解决 1】在 Supabase → SQL Editor 执行仓库里的 supabase/sql/premium_room_storage.sql（创建桶并放开 anon 上传/公开读）。\n\n' +
+              '【解决 2】在 Vercel 项目环境变量添加 SUPABASE_URL（与 VITE_SUPABASE_URL 相同）和 SUPABASE_SERVICE_ROLE_KEY（服务密钥，勿提交到代码），' +
+              '重新部署后会走 /api/premium-upload-sign 签名上传，可绕过 Storage 的 RLS 限制。\n\n' +
+              `桶名：${bucket}`
+          : `文件上传失败：${err}\n\n` +
+              `请确认 Storage 桶「${bucket}」已创建且可公开访问；若仍失败，按上面【解决 1/2】处理。`
       );
       return;
     }
@@ -625,6 +633,29 @@ export default function PremiumChatRoom() {
     }
   };
 
+  const durationLabelResolved = roomMeta
+    ? durationLabelFromSeconds(roomMeta.destroySeconds)
+    : durationLabel;
+
+  if (!supabaseConfigOk) {
+    return (
+      <div className="min-h-screen bg-[#050d1a] text-white">
+        <Navbar />
+        <div className="max-w-xl mx-auto px-4 sm:px-6 pt-28 pb-16">
+          <div className="bg-red-900/20 border border-red-500/30 rounded-3xl p-6">
+            <div className="text-red-300 font-bold text-lg mb-2">聊天室暂不可用</div>
+            <div className="text-gray-400 text-sm leading-relaxed">{supabaseConfigHint}</div>
+            <div className="mt-4 text-gray-600 text-xs">（这不是你的操作问题，是部署环境变量缺失/错误导致。）</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (reloadLeave) {
+    return <div className="min-h-screen bg-[#050d1a]" />;
+  }
+
   return (
     <div className="min-h-screen bg-[#050d1a] flex flex-col">
 
@@ -642,10 +673,10 @@ export default function PremiumChatRoom() {
               <span className="text-white font-extrabold text-base tracking-wide">高级聊天室</span>
               <span className="text-gray-500 text-sm font-mono">#{roomId}</span>
               <span className="bg-orange-400/10 text-orange-400 text-xs px-2 py-0.5 rounded-full border border-orange-400/30 flex-shrink-0">
-                ⏱ {durationLabel}
+                ⏱ 创建者选择时长 {durationLabelResolved}
               </span>
               <span className="bg-yellow-400/10 text-yellow-400 text-xs px-2 py-0.5 rounded-full border border-yellow-400/30 flex-shrink-0 tabular-nums">
-                剩余 {formatRemain(roomLeft * 1000)}
+                {!roomMeta ? '正在同步创建者房间时间…' : `创建者房间倒计时 · 剩余 ${formatRemain(roomLeft * 1000)}`}
               </span>
               <span className="bg-amber-400/10 text-amber-400 text-xs px-2 py-0.5 rounded-full border border-amber-400/30 flex-shrink-0">高级</span>
             </div>

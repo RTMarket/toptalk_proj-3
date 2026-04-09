@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
 import { postRoomEvent } from '../lib/accountApi';
+import { INSTANT_ROOM_SECONDS } from '../lib/roomConstants';
 
 interface Room {
   id: string;
@@ -17,7 +18,7 @@ interface ActiveRoom {
   destroySeconds: number;
 }
 
-const ROOM_DURATION_MS = 15 * 60 * 1000; // 15分钟
+const ROOM_DURATION_MS = INSTANT_ROOM_SECONDS * 1000;
 
 function getActiveRoom(): ActiveRoom | null {
   try {
@@ -25,7 +26,7 @@ function getActiveRoom(): ActiveRoom | null {
     if (!raw) return null;
     const room: ActiveRoom = JSON.parse(raw);
     const elapsed = Date.now() - new Date(room.createdAt).getTime();
-    if (elapsed >= room.destroySeconds * 1000) {
+    if (elapsed >= INSTANT_ROOM_SECONDS * 1000) {
       localStorage.removeItem('toptalk_active_room');
       return null;
     }
@@ -163,11 +164,13 @@ export default function FreeRoomSelection() {
     // 加入者同一时间只能加入一间：加入也写入活跃房间（离开页面会清掉）
     // 活跃倒计时按“房间创建时间”计算
     const createdAt = (localFound as any)?.createdAt || supabaseCreatedAt || new Date().toISOString()
-    const active: ActiveRoom = { id: joinRoomId, createdAt, destroySeconds: 900 };
+    const active: ActiveRoom = { id: joinRoomId, createdAt, destroySeconds: INSTANT_ROOM_SECONDS };
     setActiveRoomStorage(active);
     setActiveRoom(active);
-    setActiveRoomRemaining(ROOM_DURATION_MS);
-    navigate(`/free-chat?roomId=${joinRoomId}&destroy=900`);
+    setActiveRoomRemaining(
+      Math.max(0, INSTANT_ROOM_SECONDS * 1000 - (Date.now() - new Date(createdAt).getTime()))
+    );
+    navigate(`/free-chat?roomId=${joinRoomId}&destroy=${INSTANT_ROOM_SECONDS}`);
   };
 
   const handleCreateRoom = async () => {
@@ -195,6 +198,7 @@ export default function FreeRoomSelection() {
         room_type: 'instant',
         status: 'active',
         created_at: now,
+        destroy_seconds: INSTANT_ROOM_SECONDS,
       });
     } catch { /* ignore - localStorage 已成功写入 */ }
 
@@ -205,7 +209,7 @@ export default function FreeRoomSelection() {
     } catch { /* ignore */ }
 
     // 标记为当前活跃房间
-    const active: ActiveRoom = { id: newId, createdAt: now, destroySeconds: 900 };
+    const active: ActiveRoom = { id: newId, createdAt: now, destroySeconds: INSTANT_ROOM_SECONDS };
     localStorage.setItem('toptalk_active_room', JSON.stringify(active));
     setActiveRoom(active);
     setActiveRoomRemaining(ROOM_DURATION_MS);
@@ -213,7 +217,7 @@ export default function FreeRoomSelection() {
     setCreateLoading(false);
     // 统计：创建房间
     postRoomEvent({ roomId: newId, roomType: 'instant', event: 'create' }).catch(() => {});
-    navigate(`/free-chat?roomId=${newId}&destroy=900`);
+    navigate(`/free-chat?roomId=${newId}&destroy=${INSTANT_ROOM_SECONDS}`);
   };
 
   const goPremium = () => navigate('/rooms-premium');
@@ -377,7 +381,7 @@ export default function FreeRoomSelection() {
               </div>
               <div className="mt-2 flex items-center gap-3">
                 <button
-                  onClick={() => navigate(`/free-chat?roomId=${activeRoom.id}&destroy=900`)}
+                  onClick={() => navigate(`/free-chat?roomId=${activeRoom.id}&destroy=${INSTANT_ROOM_SECONDS}`)}
                   className="text-blue-400 text-xs hover:text-blue-300 font-medium transition-colors"
                 >
                   进入房间 →
