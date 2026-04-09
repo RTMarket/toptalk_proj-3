@@ -1,0 +1,27 @@
+---
+description: 即时/高级聊天室房间倒计时与「刷新=离开」规则已锁定，改动前须征得用户同意
+globs: src/lib/roomConstants.ts,src/pages/FreeChatRoom.tsx,src/pages/PremiumChatRoom.tsx,src/pages/FreeRoomSelection.tsx,src/pages/PremiumRoomSelection.tsx
+alwaysApply: true
+---
+
+# 房间倒计时 / 会话时间 — 已锁定
+
+用户已确认：即时房固定 **15 分钟**、高级房按 **创建者选择的时长**，倒计时均以 **`rooms.created_at` + 时长** 为唯一依据；**刷新页面 = 离开房间**；相关实现已跑通。以下视为**稳定区**。
+
+## 锁定范围（未经用户明确同意禁止修改）
+
+- `src/lib/roomConstants.ts`：`INSTANT_ROOM_SECONDS`、`isNavigationReload`、`isRoomWallClockExpired` 及同类时间工具。
+- `src/pages/FreeChatRoom.tsx`：房间元数据拉取、倒计时 tick、`isRoomWallClockExpired` / 自然到期 overlay、**刷新即离开**（`reloadLeave` + `replace`）。
+- `src/pages/PremiumChatRoom.tsx`：同上（高级房从 Supabase 读 `created_at` / `destroy_seconds`）、顶栏「创建者」倒计时文案、刷新离开。
+- `src/pages/FreeRoomSelection.tsx`：即时房创建/加入导航参数、`destroy_seconds` 写入、活跃房间剩余时间计算。
+- `src/pages/PremiumRoomSelection.tsx`：创建时长选项、加入时写入 `createdAt` / `destroySeconds`、进入房间的 query 参数（与倒计时源一致）。
+
+## 必须遵守
+
+1. **任何**对上述文件的改动，须先向用户说明：**为什么要改、改什么、风险是什么**，并得到**明确同意**后再动。
+2. 不要为了「整洁」改写倒计时公式、合并/拆分 effect 导致行为变化；**禁止**用「仅 URL 的 destroy」作为唯一倒计时来源（除非用户提出新需求并评估影响）。
+3. **禁止**在 `roomMeta` 刚写入、但 `roomLeft` 尚未 tick 时，用 `roomLeft <= 0` 单独判定「房间已结束」——必须使用 **`isRoomWallClockExpired`（墙钟）** 或等价的 `createdAt + duration` 判断。
+
+## 例外（仍需谨慎）
+
+- 仅修复**明确 bug**（且可复现）时，可最小范围修改，并在回复中**逐条说明**改了哪几行、为何不影响已确认规则。
