@@ -150,7 +150,7 @@ export default function Navbar({ hideAuth = false }: { hideAuth?: boolean }) {
                           <span>👤</span> 个人中心
                         </Link>
                         <Link
-                          to="/personal-center"
+                          to="/personal-center?tab=upgrade"
                           onClick={() => setUserMenuOpen(false)}
                           className="flex items-center gap-2.5 px-4 py-2.5 text-gray-300 hover:bg-white/5 hover:text-white text-sm transition-colors"
                         >
@@ -222,7 +222,7 @@ export default function Navbar({ hideAuth = false }: { hideAuth?: boolean }) {
                 </div>
                 <Link to="/rooms" onClick={() => setMenuOpen(false)} className="block text-gray-300 hover:text-white py-2 text-sm">🚪 聊天室</Link>
                 <Link to="/personal-center" onClick={() => setMenuOpen(false)} className="block text-gray-300 hover:text-white py-2 text-sm">👤 个人中心</Link>
-                <Link to="/personal-center" onClick={() => setMenuOpen(false)} className="block text-gray-300 hover:text-white py-2 text-sm">💳 升级套餐</Link>
+                <Link to="/personal-center?tab=upgrade" onClick={() => setMenuOpen(false)} className="block text-gray-300 hover:text-white py-2 text-sm">💳 升级套餐</Link>
                 <button onClick={handleLogout} className="block text-gray-600 hover:text-red-400 py-2 text-sm w-full text-left">🚪 退出登录</button>
               </>
             ) : !hideAuth ? (
