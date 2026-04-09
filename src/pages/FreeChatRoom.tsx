@@ -441,6 +441,19 @@ export default function FreeChatRoom() {
   const roomM = Math.floor(roomLeft / 60);
   const roomS = roomLeft % 60;
 
+  /** 用户消息按时间顺序：左右交替 + 蓝/白（即时）底色轮流 */
+  const bubbleAlternationByMessageId = useMemo(() => {
+    const map = new Map<string, number>();
+    let i = 0;
+    for (const m of messages) {
+      if (m.sender === 'system') continue;
+      const remain = msgTimes[m.id] ?? (m.expireAt > 0 ? Math.max(0, m.expireAt - Date.now()) : 0);
+      if (m.expireAt > 0 && remain <= 0) continue;
+      map.set(m.id, i++);
+    }
+    return map;
+  }, [messages, msgTimes]);
+
   if (!supabaseConfigOk) {
     return (
       <div className="min-h-screen bg-[#050d1a] text-white">
@@ -531,18 +544,21 @@ export default function FreeChatRoom() {
             {/* 消息列表（可滚动） */}
             <div className="flex-1 overflow-auto px-3 sm:px-5 py-4 space-y-3">
               {messages.map(msg => {
-                const isMine = msg.sender === userIdRef.current;
                 const isSystem = msg.sender === 'system';
                 const isFile = msg.type === 'file';
                 const isImage = isFile && isImageFile(msg.fileType || '');
                 const remain = msgTimes[msg.id] ?? (msg.expireAt > 0 ? Math.max(0, msg.expireAt - Date.now()) : 0);
                 const expired = msg.expireAt > 0 && remain <= 0;
                 const progress = msg.destroySeconds > 0 ? Math.max(0, remain / (msg.destroySeconds * 1000)) : 1;
-                const side = isMine ? 'right' : 'left';
-                const bubbleClass = isMine
-                  ? 'bg-gradient-to-br from-yellow-400/90 to-yellow-500/90 text-[#1a365d]'
-                  : 'bg-white/10 border border-white/15 text-white';
-                const nameTextClass = isMine ? 'text-gray-700' : 'text-gray-500';
+                const altIdx = bubbleAlternationByMessageId.get(msg.id) ?? 0;
+                const side = altIdx % 2 === 0 ? 'left' : 'right';
+                const isBlueStripe = altIdx % 2 === 0;
+                const bubbleClass = isBlueStripe
+                  ? 'bg-gradient-to-br from-blue-500 to-blue-600 text-white border border-blue-400/30'
+                  : 'bg-white border border-white/25 text-[#1a365d]';
+                const nameAccentClass = isBlueStripe ? 'text-blue-100' : 'text-blue-600';
+                const metaTimeClass = isBlueStripe ? 'text-blue-200/90' : 'text-gray-500';
+                const fileSecondaryClass = isBlueStripe ? 'text-blue-100/90' : 'text-gray-600';
 
                 if (isSystem) {
                   return (
@@ -560,21 +576,19 @@ export default function FreeChatRoom() {
                   <div key={msg.id} className={`flex ${side === 'right' ? 'justify-end' : 'justify-start'}`}>
                     <div className={`flex gap-2 max-w-[70%] ${side === 'right' ? 'flex-row-reverse' : 'flex-row'}`}>
 
-                      {/* 头像 */}
-                      {side === 'left' && (
-                        <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400/60 to-blue-600/60 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5">
-                          {(msg.senderName || '?')[0].toUpperCase()}
-                        </div>
-                      )}
+                      {/* 头像（左右交替时两侧都显示） */}
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-400/60 to-blue-600/60 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5">
+                        {(msg.senderName || '?')[0].toUpperCase()}
+                      </div>
 
                       <div className={`flex flex-col gap-0.5 ${side === 'right' ? 'items-end' : 'items-start'}`}>
 
                         {/* 昵称 + 时间 */}
                         <div className={`flex items-center gap-1.5 ${side === 'right' ? 'flex-row-reverse' : ''}`}>
-                          <span className={`text-xs font-semibold ${side === 'right' ? 'text-yellow-400' : 'text-blue-400'}`}>{msg.senderName}</span>
-                          <span className="text-gray-700 text-xs">{new Date(msg.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+                          <span className={`text-xs font-semibold ${nameAccentClass}`}>{msg.senderName}</span>
+                          <span className={`text-xs ${metaTimeClass}`}>{new Date(msg.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
                           {msg.destroySeconds > 0 && remain > 0 && (
-                            <span className="text-orange-400/80 text-xs">🔥 {formatRemain(remain)}</span>
+                            <span className={`text-xs ${isBlueStripe ? 'text-amber-200' : 'text-orange-500'}`}>🔥 {formatRemain(remain)}</span>
                           )}
                         </div>
 
@@ -589,8 +603,8 @@ export default function FreeChatRoom() {
                             <div className="flex items-start gap-3">
                               <span className="text-3xl flex-shrink-0">{getFileIcon(msg.fileType || '', msg.fileName || '')}</span>
                               <div className="flex-1 min-w-0">
-                                <div className="text-white font-medium text-sm break-all">{msg.fileName}</div>
-                                <div className={`${nameTextClass} text-xs mt-0.5`}>{msg.fileSize}</div>
+                                <div className={`font-medium text-sm break-all ${isBlueStripe ? 'text-white' : 'text-[#1a365d]'}`}>{msg.fileName}</div>
+                                <div className={`text-xs mt-0.5 ${fileSecondaryClass}`}>{msg.fileSize}</div>
                               </div>
                             </div>
                           )}
@@ -604,7 +618,7 @@ export default function FreeChatRoom() {
                             </div>
                           )}
                           {msg.type === 'text' && msg.destroySeconds > 0 && (
-                            <div className="w-full bg-white/10 rounded-full h-1 mt-2">
+                            <div className={`w-full rounded-full h-1 mt-2 ${isBlueStripe ? 'bg-white/20' : 'bg-gray-200'}`}>
                               <div className="h-1 rounded-full transition-all duration-500"
                                 style={{
                                   width: `${Math.max(0, Math.min(100, progress * 100))}%`,

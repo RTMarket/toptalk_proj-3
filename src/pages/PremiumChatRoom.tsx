@@ -638,6 +638,19 @@ export default function PremiumChatRoom() {
     ? durationLabelFromSeconds(roomMeta.destroySeconds)
     : durationLabel;
 
+  /** 用户消息按时间顺序：左右交替 + 黄/白（高级）底色轮流 */
+  const bubbleAlternationByMessageId = useMemo(() => {
+    const map = new Map<string, number>();
+    let i = 0;
+    for (const m of messages) {
+      if (m.sender === 'system') continue;
+      const remain = msgTimes[m.id] ?? (m.expireAt > 0 ? Math.max(0, m.expireAt - Date.now()) : 0);
+      if (m.expireAt > 0 && remain <= 0) continue;
+      map.set(m.id, i++);
+    }
+    return map;
+  }, [messages, msgTimes]);
+
   if (!supabaseConfigOk) {
     return (
       <div className="min-h-screen bg-[#050d1a] text-white">
@@ -801,18 +814,22 @@ export default function PremiumChatRoom() {
       {/* ── Messages ── */}
       <div className="flex-1 overflow-auto max-w-5xl w-full mx-auto px-4 pt-32 pb-4 space-y-4 flex flex-col justify-center">
         {messages.map(msg => {
-          const isMine = msg.sender === userIdRef.current;
           const isSystem = msg.sender === 'system';
           const isFile = msg.type === 'file';
           const isImage = isFile && isImageFile(msg.fileType || '');
           const remain = msgTimes[msg.id] ?? (msg.expireAt > 0 ? Math.max(0, msg.expireAt - Date.now()) : 0);
           const expired = msg.expireAt > 0 && remain <= 0;
           const progress = msg.destroySeconds > 0 ? Math.max(0, remain / (msg.destroySeconds * 1000)) : 1;
-          const side = isMine ? 'right' : 'left';
-          const bubbleClass = isMine
-            ? 'bg-gradient-to-br from-yellow-400/90 to-yellow-500/90 text-[#1a365d]'
-            : 'bg-white/10 border border-white/15 text-white';
-          const nameTextClass = isMine ? 'text-gray-700' : 'text-gray-500';
+          const altIdx = bubbleAlternationByMessageId.get(msg.id) ?? 0;
+          const side = altIdx % 2 === 0 ? 'left' : 'right';
+          const isYellowStripe = altIdx % 2 === 0;
+          const bubbleClass = isYellowStripe
+            ? 'bg-gradient-to-br from-yellow-400/90 to-yellow-500/90 text-[#1a365d] border border-yellow-300/35'
+            : 'bg-white border border-white/25 text-[#1a365d]';
+          const nameAccentClass = isYellowStripe ? 'text-[#1a365d]' : 'text-gray-800';
+          const metaTimeClass = isYellowStripe ? 'text-amber-900/75' : 'text-gray-500';
+          const fileNameClass = 'text-[#1a365d]';
+          const fileSizeClass = isYellowStripe ? 'text-amber-900/70' : 'text-gray-600';
 
           if (isSystem) {
             return (
@@ -831,22 +848,20 @@ export default function PremiumChatRoom() {
           return (
             <div key={msg.id} className={`flex ${side === 'right' ? 'justify-end' : 'justify-start'}`}>
               <div className={`flex gap-2 max-w-xl ${side === 'right' ? 'flex-row-reverse' : 'flex-row'}`}>
-                {side === 'left' && (
-                  <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400/40 to-amber-600/40 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5">
-                    {(msg.senderName || '?')[0].toUpperCase()}
-                  </div>
-                )}
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-amber-400/40 to-amber-600/40 flex items-center justify-center text-white text-xs font-bold flex-shrink-0 mt-0.5">
+                  {(msg.senderName || '?')[0].toUpperCase()}
+                </div>
                 <div className={`flex flex-col gap-1 ${side === 'right' ? 'items-end' : 'items-start'}`}>
                   <div className={`flex items-center gap-1.5 ${side === 'right' ? 'flex-row-reverse' : ''}`}>
-                    <span className={`${nameTextClass} text-xs`}>{msg.senderName}</span>
-                    <span className="text-gray-700 text-xs">
+                    <span className={`text-xs font-semibold ${nameAccentClass}`}>{msg.senderName}</span>
+                    <span className={`text-xs ${metaTimeClass}`}>
                       {new Date(msg.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}
                     </span>
                     {msg.destroySeconds > 0 && remain > 0 && (
-                      <span className="text-orange-400/80 text-xs flex items-center gap-0.5">🔥 {formatRemain(remain)}</span>
+                      <span className={`text-xs flex items-center gap-0.5 ${isYellowStripe ? 'text-amber-900/80' : 'text-orange-500'}`}>🔥 {formatRemain(remain)}</span>
                     )}
                     {msg.destroySeconds > 0 && remain <= 0 && (
-                      <span className="text-gray-700 text-xs">🔥 已焚毁</span>
+                      <span className={`text-xs ${isYellowStripe ? 'text-amber-900/70' : 'text-gray-600'}`}>🔥 已焚毁</span>
                     )}
                   </div>
                   <div className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
@@ -868,21 +883,25 @@ export default function PremiumChatRoom() {
                                 <span className="bg-white/20 backdrop-blur-sm text-white text-xs px-2.5 py-1 rounded-lg flex items-center gap-1">⬇ 下载</span>
                               )}
                             </div>
-                            <div className="text-white/60 text-xs truncate px-1 py-0.5 bg-black/20">{msg.fileName}</div>
+                            <div className="text-white/80 text-xs truncate px-1 py-0.5 bg-black/20">{msg.fileName}</div>
                           </div>
                         )}
                         {!isImage && (
                           <div className="flex items-start gap-3">
                             <span className="text-3xl flex-shrink-0">{getFileIcon(msg.fileType || '', msg.fileName || '')}</span>
                             <div className="flex-1 min-w-0">
-                              <div className="text-white font-medium text-sm break-all leading-tight">{msg.fileName}</div>
-                              <div className="text-gray-500 text-xs mt-0.5">{msg.fileSize}</div>
+                              <div className={`font-medium text-sm break-all leading-tight ${fileNameClass}`}>{msg.fileName}</div>
+                              <div className={`text-xs mt-0.5 ${fileSizeClass}`}>{msg.fileSize}</div>
                             </div>
                           </div>
                         )}
                         {msg.allowDownload ? (
                           <button onClick={() => void handleDownload(msg)}
-                            className="flex items-center justify-center gap-1.5 bg-white/10 hover:bg-white/15 text-gray-300 text-xs py-1.5 rounded-lg transition-colors w-full">
+                            className={`flex items-center justify-center gap-1.5 text-xs py-1.5 rounded-lg transition-colors w-full ${
+                              isYellowStripe
+                                ? 'bg-[#1a365d]/12 hover:bg-[#1a365d]/18 text-[#1a365d]'
+                                : 'bg-gray-100 hover:bg-gray-200 text-gray-800'
+                            }`}>
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                             </svg>
@@ -897,7 +916,7 @@ export default function PremiumChatRoom() {
                           </div>
                         )}
                         {msg.destroySeconds > 0 && (
-                          <div className="w-full bg-white/10 rounded-full h-1">
+                          <div className={`w-full rounded-full h-1 ${isYellowStripe ? 'bg-[#1a365d]/15' : 'bg-gray-200'}`}>
                             <div className="h-1 rounded-full transition-all duration-500"
                               style={{
                                 width: `${Math.max(0, Math.min(100, progress * 100))}%`,
@@ -908,7 +927,7 @@ export default function PremiumChatRoom() {
                       </div>
                     )}
                     {msg.type === 'text' && msg.destroySeconds > 0 && (
-                      <div className="w-full bg-white/10 rounded-full h-1 mt-2">
+                      <div className={`w-full rounded-full h-1 mt-2 ${isYellowStripe ? 'bg-[#1a365d]/15' : 'bg-gray-200'}`}>
                         <div className="h-1 rounded-full transition-all duration-500"
                           style={{
                             width: `${Math.max(0, Math.min(100, progress * 100))}%`,
