@@ -1,0 +1,39 @@
+---
+description: 聊天室 messages 历史拉取与 Supabase RLS（后进用户可读未过期历史）已锁定，改动前须征得用户同意
+globs: supabase/sql/messages_room_history_rls.sql,supabase/migrations/20260410160000_messages_select_policy_room_history.sql,src/lib/premiumRoomDbMessages.ts,src/pages/PremiumChatRoom.tsx
+alwaysApply: true
+---
+
+# 聊天室 `messages` 历史可读（RLS）— 已锁定
+
+用户已确认：后进用户进入房间后，必须能从数据库拉取**同一 `room_id` 下、未过期**的历史消息；若 `messages` 表开启 RLS 但缺少正确的 **SELECT** 策略，会导致后来者**永远看不到**先发用户的消息（仅实时广播可见）。以下视为**稳定区**。
+
+## 规则（必须保持一致）
+
+1. **客户端 `room_id` 约定**（与插入一致，禁止擅自改前缀）
+   - 即时聊天室：`free_<房间ID>`
+   - 高级聊天室：`premium_<房间ID>`
+
+2. **Supabase RLS**
+   - 必须允许使用 **anon key** 的客户端对**聊天室消息**执行 **SELECT**，否则历史拉取为空（PostgREST 常返回 `[]` 且不一定带 error）。
+   - 策略语义应与仓库内 SQL 一致：按 `room_id` 限定在 `free_%` / `premium_%`（或经用户评估后的等价策略）。
+
+3. **应用层**
+   - `fetchPremiumRoomMessagesFromDb`：拉取失败时不得静默吞掉（至少保留可诊断的日志/提示路径）；**不得**为「整洁」去掉对后进用户历史合并的逻辑。
+
+## 锁定范围（未经用户明确同意禁止修改）
+
+- `supabase/sql/messages_room_history_rls.sql`
+- `supabase/migrations/20260410160000_messages_select_policy_room_history.sql`
+- `src/lib/premiumRoomDbMessages.ts` 中与 **`messages` 表查询/历史拉取/错误处理**相关的逻辑
+- `src/pages/PremiumChatRoom.tsx` 中与 **进房拉取历史消息**（`fetchPremiumRoomMessagesFromDb`）相关的 effect/条件（如 `supabaseConfigOk` 守卫）
+
+## 必须遵守
+
+1. **任何**对上述 SQL / 策略 / 拉取链路的改动，须先向用户说明：**为什么要改、改什么、风险是什么（尤其是对后进用户是否还能读到未过期历史）**，并得到**明确同意**后再动。
+2. **禁止**在未评估的情况下删除 `DROP POLICY` / 策略名、改桶/表名、改 `room_id` 前缀约定导致线上历史全断。
+3. 若必须调整 RLS（例如收紧权限），必须同步验证：**插入、按房间查询、后进拉取、到期删除**四条路径仍可用。
+
+## 例外（仍需谨慎）
+
+- 仅修复**明确 bug**（且可复现）时，可最小范围修改，并在回复中**逐条说明**改了哪几行、为何不影响上述「后进可读未过期历史」规则。
