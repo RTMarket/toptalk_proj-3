@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseConfigHint, supabaseConfigOk } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
 import { postRoomEvent } from '../lib/accountApi';
 
@@ -77,6 +77,8 @@ export default function FreeChatRoom() {
   const roomId = searchParams.get('roomId') || '——';
   const roomDestroy = parseInt(searchParams.get('destroy') || '900');
 
+  const [rtStatus, setRtStatus] = useState<'connecting' | 'ready' | 'failed'>('connecting');
+
   const [overlay, setOverlay] = useState<string | null>(null);
   const [roomLeft, setRoomLeft] = useState(roomDestroy);
   const [messages, setMessages] = useState<Message[]>(mockMessages);
@@ -95,6 +97,22 @@ export default function FreeChatRoom() {
   const userIdRef = useRef(`u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
   const nicknameRef = useRef('匿名用户');
   const [userOrder, setUserOrder] = useState<string[]>([]);
+
+  // Supabase env 未配置时：直接提示（否则会出现“能发送但彼此看不到”的假象）
+  if (!supabaseConfigOk) {
+    return (
+      <div className="min-h-screen bg-[#050d1a] text-white">
+        <Navbar />
+        <div className="max-w-xl mx-auto px-4 sm:px-6 pt-28 pb-16">
+          <div className="bg-red-900/20 border border-red-500/30 rounded-3xl p-6">
+            <div className="text-red-300 font-bold text-lg mb-2">聊天室暂不可用</div>
+            <div className="text-gray-400 text-sm leading-relaxed">{supabaseConfigHint}</div>
+            <div className="mt-4 text-gray-600 text-xs">（这不是你的操作问题，是部署环境变量缺失/错误导致。）</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // 统计：进入/离开房间（不影响聊天功能，失败忽略）
   useEffect(() => {
@@ -194,6 +212,7 @@ export default function FreeChatRoom() {
 
     channel.subscribe(async (status) => {
       if (status !== 'SUBSCRIBED') return;
+      setRtStatus('ready');
       await channel.track({
         userId: uid,
         roomId,
@@ -208,6 +227,15 @@ export default function FreeChatRoom() {
         channel.unsubscribe();
       } catch { /* ignore */ }
     };
+  }, [roomId]);
+
+  // 如果长时间没订阅成功，提示用户（网络/Realtime 异常）
+  useEffect(() => {
+    setRtStatus('connecting');
+    const t = window.setTimeout(() => {
+      setRtStatus(s => (s === 'ready' ? s : 'failed'));
+    }, 6000);
+    return () => window.clearTimeout(t);
   }, [roomId]);
 
   // ── 进入房间权限检查 ─────────────────────────────────
@@ -384,6 +412,15 @@ export default function FreeChatRoom() {
               <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse flex-shrink-0"></div>
               <span className="text-green-400 font-medium text-xs">{onlineCount} 人在线</span>
             </div>
+
+            {/* Realtime 状态 */}
+            {rtStatus !== 'ready' && (
+              <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/25 rounded-lg px-3 py-1.5">
+                <span className="text-red-300 text-xs font-semibold">
+                  {rtStatus === 'connecting' ? '实时连接中…' : '实时连接失败'}
+                </span>
+              </div>
+            )}
 
             {/* 右侧：操作按钮 */}
             <div className="flex items-center gap-2 flex-shrink-0">

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseConfigHint, supabaseConfigOk } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
 import { postRoomEvent } from '../lib/accountApi';
 import { getActivePremiumRooms, removeActivePremiumRoom, upsertActivePremiumRoom } from '../lib/premiumActiveRooms';
@@ -89,6 +89,7 @@ export default function PremiumChatRoom() {
   const nicknameRef = useRef('匿名用户');
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const [userOrder, setUserOrder] = useState<string[]>([]);
+  const [rtStatus, setRtStatus] = useState<'connecting' | 'ready' | 'failed'>('connecting');
 
   const [overlayType, setOverlayType] = useState<'dissolving' | 'leaving' | 'expired' | null>(null);
   const [showDissolveConfirm, setShowDissolveConfirm] = useState(false);
@@ -107,6 +108,22 @@ export default function PremiumChatRoom() {
     size: string; mime: string; allowDownload: boolean;
   } | null>(null);
   const [fileUploading, setFileUploading] = useState(false);
+
+  // Supabase env 未配置时：直接提示（否则会出现“能发送但彼此看不到”的假象）
+  if (!supabaseConfigOk) {
+    return (
+      <div className="min-h-screen bg-[#050d1a] text-white">
+        <Navbar />
+        <div className="max-w-xl mx-auto px-4 sm:px-6 pt-28 pb-16">
+          <div className="bg-red-900/20 border border-red-500/30 rounded-3xl p-6">
+            <div className="text-red-300 font-bold text-lg mb-2">聊天室暂不可用</div>
+            <div className="text-gray-400 text-sm leading-relaxed">{supabaseConfigHint}</div>
+            <div className="mt-4 text-gray-600 text-xs">（这不是你的操作问题，是部署环境变量缺失/错误导致。）</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── 读取昵称（用于消息展示/广播）────────────────────────
   useEffect(() => {
@@ -240,6 +257,7 @@ export default function PremiumChatRoom() {
 
     channel.subscribe(async (status) => {
       if (status !== 'SUBSCRIBED') return;
+      setRtStatus('ready');
       try {
         await channel.track({ userId: uid, roomId, online_at: new Date().toISOString() });
       } catch {
@@ -256,6 +274,14 @@ export default function PremiumChatRoom() {
       } catch { /* ignore */ }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
+
+  useEffect(() => {
+    setRtStatus('connecting');
+    const t = window.setTimeout(() => {
+      setRtStatus(s => (s === 'ready' ? s : 'failed'));
+    }, 6000);
+    return () => window.clearTimeout(t);
   }, [roomId]);
 
   // Room countdown
@@ -563,6 +589,14 @@ export default function PremiumChatRoom() {
                 <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></div>
                 <span className="text-green-400 text-xs font-semibold">{onlineCount} 人在线</span>
               </div>
+              {/* Realtime 状态 */}
+              {rtStatus !== 'ready' && (
+                <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/25 rounded-lg px-3 py-1.5">
+                  <span className="text-red-300 text-xs font-semibold">
+                    {rtStatus === 'connecting' ? '实时连接中…' : '实时连接失败'}
+                  </span>
+                </div>
+              )}
               {/* 解散房间 */}
               {amICreator && (
                 <button onClick={() => setShowDissolveConfirm(true)}

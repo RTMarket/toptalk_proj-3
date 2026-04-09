@@ -5,6 +5,13 @@ const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undef
 
 // 注意：不要在模块加载时 throw，否则线上（如 Vercel 未配置 env）会直接白屏。
 // 缺少配置时，Supabase 调用会失败，但应用其余页面仍可正常渲染。
+export const supabaseConfigOk =
+  !!supabaseUrl && !supabaseUrl.includes('placeholder') &&
+  !!supabaseAnonKey && !supabaseAnonKey.includes('placeholder')
+
+export const supabaseConfigHint =
+  'Supabase 未正确配置：请在部署环境设置 VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY（真实值），否则聊天室实时消息无法互通。'
+
 export const supabase = createClient(
   supabaseUrl && !supabaseUrl.includes('placeholder') ? supabaseUrl : 'https://placeholder.supabase.co',
   supabaseAnonKey && !supabaseAnonKey.includes('placeholder') ? supabaseAnonKey : 'placeholder-anon-key'
