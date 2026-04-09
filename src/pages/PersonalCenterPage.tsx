@@ -6,6 +6,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { clampNickname, isValidNickname, NICKNAME_MAX_LEN } from '../lib/nickname';
 import { isValidInviteCode, normalizeInviteCode, redeemInviteCode } from '../lib/inviteCodeApi';
 import { accountMe } from '../lib/accountApi';
+import { computePlanExpiresAtIso, computePlanExpiresAtMs, SINGLE_PLAN_DURATION_MS } from '../lib/planExpiry';
 import { isSingleConsumedForCurrentPurchase } from '../lib/singlePlanConsumption';
 
 const planLabels: Record<string, string> = {
@@ -62,30 +63,6 @@ function toMs(iso?: string | null): number | null {
   if (!iso) return null;
   const t = new Date(String(iso)).getTime();
   return Number.isFinite(t) ? t : null;
-}
-
-/** 以中国时区（UTC+8）的“当天 00:00”作为计时起点 */
-function startOfDayCstMs(epochMs: number): number {
-  const offset = 8 * 60 * 60 * 1000;
-  return Math.floor((epochMs + offset) / 86400000) * 86400000 - offset;
-}
-
-/** 对按天计时的套餐：有效期到“最后一天 23:59:59”（含当天），更符合用户认知 */
-function endOfDayExpiryMsFromStartCst(startMs: number, days: number): number {
-  return startMs + days * 86400000 - 1000;
-}
-
-/** 按自然日计时的套餐周期（天）。单次高级不按天展示/校准，由「创建房间」消耗逻辑控制。 */
-function getPlanDays(planId: string): number | null {
-  switch (planId) {
-    case 'daily': return 1;
-    case 'weekly': return 7;
-    case 'monthly': return 30;
-    case 'enterprise': return 30;
-    case 'enterprise_pro': return 30;
-    case 'single': return null;
-    default: return null;
-  }
 }
 
 type Tab = 'subscription' | 'upgrade' | 'profile' | 'security';
@@ -183,38 +160,31 @@ export default function PersonalCenterPage() {
         } catch { /* ignore */ }
       }
 
-      // 规则 A：不叠加（到期时间始终=生效时间+套餐天数）
-      // 如果本地缓存出现异常（例如显示 58 天），在个人中心做一次校准并写回 localStorage
+      // 规则：开通时刻起算；单次 2h30m；日/周/月 为 N×24h−1 分钟。与 planExpiry.ts / 后端 redeem 一致。
       try {
-        const days = getPlanDays(p);
-        const purchasedMsRaw = toMs(purchased);
-        const purchasedMs = purchasedMsRaw ? startOfDayCstMs(purchasedMsRaw) : null;
-        const expiresMs = toMs(expires);
-        if (days) {
+        if (p !== 'free') {
+          let purchasedMsRaw = toMs(purchased);
+          const expiresMs = toMs(expires);
           const toleranceMs = 2 * 60 * 1000;
-          // 如果缺少 purchasedAt，但 expiresAt 异常偏大（例如 58 天），按“现在生效”校准
-          const maxRemainingMs = days * 86400000 + toleranceMs;
-          if (!purchasedMs) {
-            const remainingMs = expiresMs ? Math.max(0, expiresMs - Date.now()) : 0;
-            if (!expiresMs || remainingMs > maxRemainingMs) {
-              const baseMs = startOfDayCstMs(Date.now());
-              purchased = new Date(baseMs).toISOString();
-              expires = new Date(endOfDayExpiryMsFromStartCst(baseMs, days)).toISOString();
+          // 仅有到期、缺少开通：单次可从到期反推开通，避免每次刷新把开通时间写成「现在」
+          if (!purchasedMsRaw && expiresMs && p === 'single') {
+            purchasedMsRaw = expiresMs - SINGLE_PLAN_DURATION_MS;
+            purchased = new Date(purchasedMsRaw).toISOString();
+            localStorage.setItem('toptalk_plan_purchased', purchased);
+          }
+          const basePurchase = purchasedMsRaw ?? Date.now();
+          const expectedMs = computePlanExpiresAtMs(p, basePurchase);
+          if (expectedMs != null) {
+            if (!purchasedMsRaw) {
+              purchased = new Date(basePurchase).toISOString();
+              expires = new Date(expectedMs).toISOString();
               localStorage.setItem('toptalk_plan_purchased', purchased);
               localStorage.setItem('toptalk_plan_expires', expires);
               localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: p, expireAt: expires }));
-            }
-          } else {
-            const expectedExpiresMs = endOfDayExpiryMsFromStartCst(purchasedMs, days);
-            if (!expiresMs || expiresMs > expectedExpiresMs + toleranceMs || expiresMs < expectedExpiresMs - toleranceMs) {
-              expires = new Date(expectedExpiresMs).toISOString();
+            } else if (!expiresMs || Math.abs(expiresMs - expectedMs) > toleranceMs) {
+              expires = new Date(expectedMs).toISOString();
               localStorage.setItem('toptalk_plan_expires', expires);
               localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: p, expireAt: expires }));
-            }
-            // purchasedAt 若不是“当天 00:00”，也统一写回（保证老用户按 0:00 起算）
-            if (purchasedMsRaw && purchasedMsRaw !== purchasedMs) {
-              purchased = new Date(purchasedMs).toISOString();
-              localStorage.setItem('toptalk_plan_purchased', purchased);
             }
           }
         }
@@ -232,23 +202,29 @@ export default function PersonalCenterPage() {
         let nextPurchasedAt = String(me?.planPurchasedAt || '').trim();
         let nextExpiresAt = String(me?.planExpiresAt || '').trim();
 
-        // 仅当服务端明确为 free 时清空本地订阅；有套餐但缺字段时合并本地/推算，避免全员「已过期」
+        const localPlanGuard = (localStorage.getItem('toptalk_plan') || 'free').trim();
+        const localExpGuard = toMs(localStorage.getItem('toptalk_plan_expires'));
+        const localActiveGuard = localPlanGuard !== 'free' && localExpGuard != null && localExpGuard > Date.now();
+
+        // 服务端为 free：仅当本地也没有有效付费订阅时才清空（避免 DB 未同步导致刷新后变免费）
         if (nextPlan === 'free') {
-          try {
-            localStorage.setItem('toptalk_plan', 'free');
-            localStorage.removeItem('toptalk_plan_purchased');
-            localStorage.removeItem('toptalk_plan_expires');
-            localStorage.removeItem('toptalk_subscription');
-          } catch { /* ignore */ }
+          const localPlan = localPlanGuard;
+          const localExp = localExpGuard;
+          const localActive = localPlan !== 'free' && localExp != null && localExp > Date.now();
+          if (!localActive) {
+            try {
+              localStorage.setItem('toptalk_plan', 'free');
+              localStorage.removeItem('toptalk_plan_purchased');
+              localStorage.removeItem('toptalk_plan_expires');
+              localStorage.removeItem('toptalk_subscription');
+            } catch { /* ignore */ }
+          }
         } else {
           if (!nextExpiresAt && nextPurchasedAt) {
-            const days = getPlanDays(nextPlan);
-            if (days) {
-              const pm = toMs(nextPurchasedAt);
-              if (pm) {
-                const baseMs = startOfDayCstMs(pm);
-                nextExpiresAt = new Date(endOfDayExpiryMsFromStartCst(baseMs, days)).toISOString();
-              }
+            const pm = toMs(nextPurchasedAt);
+            if (pm) {
+              const iso = computePlanExpiresAtIso(nextPlan, pm);
+              if (iso) nextExpiresAt = iso;
             }
           }
           if (!nextExpiresAt) nextExpiresAt = (localStorage.getItem('toptalk_plan_expires') || '').trim();
@@ -264,14 +240,17 @@ export default function PersonalCenterPage() {
           } catch { /* ignore */ }
         }
 
-        try {
-          const raw = localStorage.getItem('toptalk_user');
-          const u = raw ? JSON.parse(raw) : {};
-          u.plan = nextPlan;
-          if (nextPurchasedAt) u.planPurchasedAt = nextPurchasedAt;
-          if (nextExpiresAt) u.planExpiresAt = nextExpiresAt;
-          localStorage.setItem('toptalk_user', JSON.stringify(u));
-        } catch { /* ignore */ }
+        // 服务端误报 free 但本地仍有效时，勿覆盖 toptalk_user.plan（否则刷新后变免费）
+        if (!(nextPlan === 'free' && localActiveGuard)) {
+          try {
+            const raw = localStorage.getItem('toptalk_user');
+            const u = raw ? JSON.parse(raw) : {};
+            u.plan = nextPlan;
+            if (nextPurchasedAt) u.planPurchasedAt = nextPurchasedAt;
+            if (nextExpiresAt) u.planExpiresAt = nextExpiresAt;
+            localStorage.setItem('toptalk_user', JSON.stringify(u));
+          } catch { /* ignore */ }
+        }
 
         window.dispatchEvent(new Event('storage'));
         window.dispatchEvent(new Event('toptalk_login'));
@@ -426,11 +405,16 @@ export default function PersonalCenterPage() {
                   )}
                   {plan === 'single' ? (
                     <div className="bg-white/5 border border-white/10 rounded-xl px-4 py-3">
-                      <div className="text-gray-500 text-xs mb-1">单次权益</div>
-                      <div className="text-yellow-400 font-bold text-sm leading-snug">
+                      <div className="text-gray-500 text-xs mb-1">剩余有效期</div>
+                      {planExpiresAt && remaining > 0 ? (
+                        <div className="text-yellow-400 font-bold text-sm">{formatCountdown(remaining) || '即将到期'}</div>
+                      ) : (
+                        <div className="text-gray-400 font-semibold text-sm">已过期</div>
+                      )}
+                      <div className="text-gray-600 text-[11px] mt-2 leading-snug">
                         {isSingleConsumedForCurrentPurchase()
-                          ? '已使用：创建过 1 个高级聊天室后，本次单次权益已消耗'
-                          : '未使用：可创建 1 个高级聊天室；创建后即消耗（不按自然日剩余天数显示）'}
+                          ? '本次单次权益已用于创建高级房'
+                          : '单次：可创建 1 个高级聊天室，创建后即消耗'}
                       </div>
                     </div>
                   ) : planExpiresAt && remaining > 0 ? (

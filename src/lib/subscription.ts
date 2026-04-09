@@ -1,30 +1,13 @@
 import { normalizeClientAnonKey } from './anonKey'
+import { computePlanExpiresAtIso } from './planExpiry'
 
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
 const ANON_KEY = normalizeClientAnonKey(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)
-
-const PLAN_EXPIRY_DAYS: Record<string, number> = {
-  daily: 1,
-  weekly: 7,
-  monthly: 30,
-  // 单次高级：不按时间过期，而是“创建次数=1”消耗（创建一次高级聊天室后即视为用完）。
-  // 这里给一个很长的有效期，避免用户“买了但还没用”却因为时间到了而失效。
-  // 真正的限制在 PremiumRoomSelection.tsx 的单次消耗逻辑里。
-  single: 3650,
-  enterprise: 30,
-  enterprise_pro: 30,
-}
 
 function toMs(iso?: string | null): number | null {
   if (!iso) return null
   const t = new Date(String(iso)).getTime()
   return Number.isFinite(t) ? t : null
-}
-
-/** 以中国时区（UTC+8）的“当天 00:00”作为计时起点 */
-function startOfDayCstMs(epochMs: number): number {
-  const offset = 8 * 3600 * 1000
-  return Math.floor((epochMs + offset) / 86400000) * 86400000 - offset
 }
 
 export async function syncSubscriptionFromApprovedOrder(email: string): Promise<void> {
@@ -52,16 +35,14 @@ export async function syncSubscriptionFromApprovedOrder(email: string): Promise<
       created_at?: string | null
     }
     if (!planId) return
-    const days = PLAN_EXPIRY_DAYS[planId] ?? 30
 
-    // 以订单通过时间（或创建时间）为准计算有效期。
-    // 注意：对公转账渠道关闭后，这里主要用于兼容历史订单同步；不做“剩余时间叠加”，避免出现 58 天等超出套餐周期的展示。
-    const orderBaseMs = startOfDayCstMs(toMs(approvedAt) ?? toMs(createdAt) ?? Date.now())
+    // 以订单通过时间（或创建时间）为开通时刻；到期规则见 planExpiry.ts（单次 2h30m；其余 N×24h−1 分钟）
+    const orderBaseMs = toMs(approvedAt) ?? toMs(createdAt) ?? Date.now()
     const localExpiresMs = toMs(localStorage.getItem('toptalk_plan_expires'))
 
     const purchasedAtIso = new Date(orderBaseMs).toISOString()
-    // 有效期到“最后一天 23:59:59”（含当天）
-    const expiresAt = new Date(orderBaseMs + days * 86400000 - 1000).toISOString()
+    const expiresAt = computePlanExpiresAtIso(planId, orderBaseMs)
+    if (!expiresAt) return
 
     // 如果本地已有更新/更晚的套餐（例如邀请码兑换），不要被旧订单覆盖
     const localPurchasedMs = toMs(localStorage.getItem('toptalk_plan_purchased'))

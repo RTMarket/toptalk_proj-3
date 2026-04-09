@@ -259,19 +259,21 @@ async function handleLogout(req: Request) {
   return json({ success: true })
 }
 
-const PLAN_EXPIRY_DAYS: Record<string, number> = {
+/** 与前端 planExpiry.ts 一致：开通时刻起算；单次 2h30m；其余 N×24h−1 分钟 */
+const PLAN_NOMINAL_DAYS: Record<string, number> = {
   daily: 1,
   weekly: 7,
   monthly: 30,
-  single: 3650,
   enterprise: 30,
   enterprise_pro: 30,
 }
+const SINGLE_PLAN_MS = 2.5 * 3600 * 1000
+const MINUTE_MS = 60 * 1000
 
-/** 以中国时区（UTC+8）的“当天 00:00”作为计时起点 */
-function startOfDayCstMs(epochMs: number): number {
-  const offset = 8 * 3600 * 1000
-  return Math.floor((epochMs + offset) / 86400000) * 86400000 - offset
+function computePlanExpiresAtIso(planId: string, purchasedMs: number): string {
+  if (planId === 'single') return new Date(purchasedMs + SINGLE_PLAN_MS).toISOString()
+  const days = PLAN_NOMINAL_DAYS[planId] ?? 30
+  return new Date(purchasedMs + days * 86400000 - MINUTE_MS).toISOString()
 }
 
 async function handleRedeemInvite(req: Request) {
@@ -298,12 +300,9 @@ async function handleRedeemInvite(req: Request) {
   if (!row?.plan_id) return json({ success: false, message: 'notfound' }, 404)
 
   const planId = String((row as any).plan_id || '')
-  const days = PLAN_EXPIRY_DAYS[planId] ?? 30
   const nowMs = Date.now()
-  const baseMs = startOfDayCstMs(nowMs)
-  const purchasedAt = new Date(baseMs).toISOString()
-  // 有效期到“最后一天 23:59:59”（含当天）
-  const expiresAt = new Date(baseMs + days * 86400000 - 1000).toISOString()
+  const purchasedAt = new Date(nowMs).toISOString()
+  const expiresAt = computePlanExpiresAtIso(planId, nowMs)
 
   const { error: upErr } = await supabaseAdmin
     .from('app_users')
