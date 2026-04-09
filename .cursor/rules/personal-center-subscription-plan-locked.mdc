@@ -1,0 +1,26 @@
+---
+description: 个人中心套餐/订阅倒计时与开通规则已锁定，改动前须征得用户同意
+globs: src/lib/planExpiry.ts,src/lib/subscription.ts,src/pages/PersonalCenterPage.tsx,supabase/functions/account/index.ts
+alwaysApply: true
+---
+
+# 个人中心套餐倒计时 / 订阅规则 — 已锁定
+
+用户已确认：个人中心「套餐剩余有效期」的**计时口径、展示格式、与服务端/本地同步方式**已按产品规则跑通。以下视为**稳定区**，**未经用户明确允许，禁止擅自修改、重构或「顺手优化」**。
+
+## 锁定范围（须用户同意后再动）
+
+- `src/lib/planExpiry.ts`：**套餐到期时间计算**（单次时长、日/周/月「N×24h − 1 分钟」等）。此为**唯一口径来源**，其它处应与之一致。
+- `src/lib/subscription.ts`：历史订单同步到本地 `toptalk_plan_*` 时，**不得改到期计算公式**导致与 `planExpiry` 不一致。
+- `src/pages/PersonalCenterPage.tsx`：与套餐相关的 **`useCountdown` / `formatCountdown`（含每秒刷新与是否显示秒）**、**本地 `toptalk_plan_*` 校准**、**`accountMe` 合并逻辑**（含「服务端误报 free 时勿覆盖本地有效订阅」）、**订阅 Tab 内套餐剩余时间展示**。
+- `supabase/functions/account/index.ts`：与 **邀请码兑换（redeem-invite）写入 `plan_purchased_at` / `plan_expires_at`**、以及 **`/me` 返回用户 `plan` 字段**相关的逻辑。**禁止**在未说明后果的情况下改套餐写入规则；该文件若还有登录/注册等其它逻辑，非套餐相关改动仍应谨慎，但**套餐时间规则**必须遵守本节。
+
+## 必须遵守
+
+1. **任何**对上述范围内行为的改动，须先向用户说明：**为什么要改、改什么、风险是什么（含对已开通用户展示/到期的影响）**，并得到**明确同意**后再动。
+2. **禁止**为「代码好看」改写到期公式、把 `floor/ceil`、展示单位（天/时/分/秒）或同步顺序改到行为变化。
+3. **禁止**在未评估的情况下，让个人中心与服务端、邀请码兑换、本地缓存三者之间的**到期时间口径**出现分叉。
+
+## 例外（仍需谨慎）
+
+- 仅修复**明确 bug**（且可复现）时，可**最小范围**修改，并在回复中**逐条说明**改了哪几行、为何不影响已确认的套餐倒计时规则。
