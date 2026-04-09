@@ -278,10 +278,6 @@ export default function PersonalCenterPage() {
   const currentPlanData = pricingPlans.find(p => p.id === plan);
   const purchasedDate = planPurchasedAt ? new Date(planPurchasedAt).toLocaleDateString('zh-CN') : null;
 
-  if (!user) {
-    return <div className="min-h-screen bg-[#050d1a] flex items-center justify-center"><div className="text-gray-400">加载中...</div></div>;
-  }
-
   const tabs: { id: Tab; label: string; icon: string }[] = [
     { id: 'subscription', label: '订阅套餐', icon: '💎' },
     { id: 'upgrade', label: '升级套餐', icon: '💳' },
@@ -295,6 +291,10 @@ export default function PersonalCenterPage() {
     if (tabs.some(x => x.id === t)) setActiveTab(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams.toString()]);
+
+  if (!user) {
+    return <div className="min-h-screen bg-[#050d1a] flex items-center justify-center"><div className="text-gray-400">加载中...</div></div>;
+  }
 
   return (
     <div className="min-h-screen bg-[#050d1a] text-white">
