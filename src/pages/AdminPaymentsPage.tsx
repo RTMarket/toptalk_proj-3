@@ -58,8 +58,7 @@ export default function AdminPaymentsPage() {
   const [inviteQty, setInviteQty] = useState(10)
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteErr, setInviteErr] = useState('')
-  const [inviteCodes, setInviteCodes] = useState<GeneratedInviteCode[]>([])
-
+  
   useEffect(() => {
     const t = getAdminToken()
     if (!t) {
