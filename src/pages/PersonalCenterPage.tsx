@@ -4,6 +4,7 @@ import Footer from '../components/layout/Footer';
 import { pricingPlans } from '../data/pricingData';
 import { Link } from 'react-router-dom';
 import { clampNickname, isValidNickname, NICKNAME_MAX_LEN } from '../lib/nickname';
+import { isValidInviteCode, normalizeInviteCode, redeemInviteCode } from '../lib/inviteCodeApi';
 
 const planLabels: Record<string, string> = {
   free: '免费版', single: '单次高级', daily: '日卡', weekly: '周卡',
@@ -98,6 +99,10 @@ export default function PersonalCenterPage() {
   const [planPurchasedAt, setPlanPurchasedAt] = useState('');
   const [planExpiresAt, setPlanExpiresAt] = useState('');
   const remaining = useCountdown(planExpiresAt || null);
+  const [inviteCode, setInviteCode] = useState('');
+  const [inviteLoading, setInviteLoading] = useState(false);
+  const [inviteError, setInviteError] = useState('');
+  const [inviteSuccess, setInviteSuccess] = useState('');
 
   useEffect(() => {
     const loadUser = () => {
@@ -263,6 +268,69 @@ export default function PersonalCenterPage() {
             </div>
 
             <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+              <h3 className="text-white font-semibold mb-1">邀请码开通套餐</h3>
+              <p className="text-gray-500 text-sm mb-4">输入 6 位邀请码（大写字母+数字）即可立即开通对应套餐</p>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <input
+                  value={inviteCode}
+                  onChange={e => {
+                    setInviteError('');
+                    setInviteSuccess('');
+                    setInviteCode(normalizeInviteCode(e.target.value));
+                  }}
+                  placeholder="例如：A1B2C3"
+                  inputMode="text"
+                  className="flex-1 bg-white/5 border border-white/15 rounded-xl px-5 py-3.5 text-white text-base placeholder-gray-600 focus:outline-none focus:border-yellow-400/50 transition-colors tracking-widest font-mono"
+                  maxLength={6}
+                />
+                <button
+                  disabled={inviteLoading || !isValidInviteCode(inviteCode)}
+                  onClick={async () => {
+                    if (!isValidInviteCode(inviteCode)) { setInviteError('请输入 6 位大写字母/数字邀请码'); return; }
+                    setInviteLoading(true);
+                    setInviteError('');
+                    setInviteSuccess('');
+                    try {
+                      const r = await redeemInviteCode(inviteCode);
+                      localStorage.setItem('toptalk_plan', r.planId);
+                      if (r.purchasedAt) localStorage.setItem('toptalk_plan_purchased', r.purchasedAt);
+                      localStorage.setItem('toptalk_plan_expires', r.expiresAt);
+                      localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: r.planId, expireAt: r.expiresAt }));
+                      // 同步 user 信息（不影响登录态）
+                      try {
+                        const raw = localStorage.getItem('toptalk_user');
+                        const u = raw ? JSON.parse(raw) : {};
+                        u.plan = r.planId;
+                        u.planPurchasedAt = r.purchasedAt;
+                        u.planExpiresAt = r.expiresAt;
+                        localStorage.setItem('toptalk_user', JSON.stringify(u));
+                      } catch { /* ignore */ }
+                      window.dispatchEvent(new Event('storage'));
+                      window.dispatchEvent(new Event('toptalk_login'));
+                      setInviteCode('');
+                      setInviteSuccess('兑换成功，套餐已开通');
+                    } catch (e: unknown) {
+                      const msg = e instanceof Error ? e.message : '兑换失败';
+                      setInviteError(msg);
+                    } finally {
+                      setInviteLoading(false);
+                    }
+                  }}
+                  className="sm:w-40 bg-gradient-to-r from-yellow-400 to-yellow-500 text-[#1a365d] font-bold py-3.5 rounded-xl text-base hover:from-yellow-300 hover:to-yellow-400 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {inviteLoading ? '兑换中...' : '立即开通'}
+                </button>
+              </div>
+
+              {inviteError && <p className="text-red-400 text-sm mt-3">{inviteError}</p>}
+              {inviteSuccess && <p className="text-green-400 text-sm mt-3">{inviteSuccess}</p>}
+              <p className="text-gray-700 text-xs mt-3">
+                说明：邀请码兑换需要后端已部署 `account/redeem-invite` 接口。
+              </p>
+            </div>
+
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
               <h3 className="text-white font-semibold mb-4">所有套餐一览</h3>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
                 {pricingPlans.map(p => (
@@ -383,3 +451,4 @@ export default function PersonalCenterPage() {
     </div>
   );
 }
+
