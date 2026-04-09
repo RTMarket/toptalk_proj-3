@@ -342,6 +342,22 @@ export default function PremiumChatRoom() {
     setTimeout(() => { window.location.replace('/rooms-premium'); }, 2100);
   };
 
+  // 离开网页/关闭标签页：也算离开房间（加入者需释放活跃占用）
+  useEffect(() => {
+    if (!roomId || roomId === '------') return;
+    const release = () => {
+      try {
+        const cur = getActivePremiumRooms().find(r => r.id === roomId);
+        if (cur?.role === 'member') removeActivePremiumRoom(roomId);
+      } catch { /* ignore */ }
+      // 事件上报尽力而为
+      postRoomEvent({ roomId, roomType: 'premium', event: 'leave' }).catch(() => {});
+      try { channelRef.current?.unsubscribe(); } catch { /* ignore */ }
+    };
+    window.addEventListener('pagehide', release);
+    return () => window.removeEventListener('pagehide', release);
+  }, [roomId]);
+
   const handleSendFile = async () => {
     if (!pendingFile || fileUploading) return;
     const now = Date.now();

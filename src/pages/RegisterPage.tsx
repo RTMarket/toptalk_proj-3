@@ -28,6 +28,15 @@ export default function RegisterPage() {
     const [showPassword, setShowPassword] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
     const [codeCountdown, setCodeCountdown] = useState(0);
+    const [blockedByLogin, setBlockedByLogin] = useState(false);
+
+    // 已登录用户不允许再注册：提示并阻止提交
+    useEffect(() => {
+        const t = (localStorage.getItem('toptalk_session_token') || '').trim();
+        if (!t) return;
+        setBlockedByLogin(true);
+        setErrors({ email: '你已处于登录状态，请先退出登录后再注册新账号。' });
+    }, []);
 
     const validate = () => {
         const e: Record<string, string> = {};
@@ -79,6 +88,7 @@ export default function RegisterPage() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (blockedByLogin) return;
         const v = validate();
         if (Object.keys(v).length > 0) { setErrors(v); return; }
         if (!SUPABASE_URL || !ANON_KEY || ANON_KEY.includes('placeholder')) {
@@ -124,6 +134,20 @@ export default function RegisterPage() {
                 <div className="bg-white/5 border border-white/15 rounded-3xl p-10 backdrop-blur-sm">
                     <h1 className="text-3xl font-bold text-white mb-3 tracking-wide">注册账户</h1>
                     <p className="text-gray-500 mb-8">创建账户，开始使用 TopTalk</p>
+
+                    {blockedByLogin && (
+                        <div className="bg-yellow-500/10 border border-yellow-400/30 rounded-2xl p-4 mb-6 text-yellow-200 text-sm">
+                            你已处于登录状态。若要注册新账号，请先退出登录；或直接前往
+                            <button
+                                type="button"
+                                onClick={() => navigate('/personal')}
+                                className="ml-1 text-yellow-300 hover:text-yellow-200 font-semibold underline underline-offset-2"
+                            >
+                                个人中心
+                            </button>
+                            。
+                        </div>
+                    )}
 
                     <form onSubmit={handleSubmit} className="space-y-6">
                         <div>

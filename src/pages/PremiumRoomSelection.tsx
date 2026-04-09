@@ -356,6 +356,7 @@ export default function PremiumRoomSelection() {
         password: createPassword,
         destroy_seconds: createDuration,
         status: 'active',
+        created_at: now,
       });
     } catch { /* ignore - localStorage 已成功 */ }
 
@@ -399,6 +400,7 @@ export default function PremiumRoomSelection() {
     // 高级聊天室：查 Supabase（所有用户共享的房间数据）结合本地记录（创建者的密码）
     let targetPassword = '';
     let targetDestroy = 900;
+    let targetCreatedAt = '';
 
     // 优先查本地记录（创建者的房间元数据）
     const localRooms: any[] = JSON.parse(localStorage.getItem('toptalk_rooms') || '[]');
@@ -406,19 +408,21 @@ export default function PremiumRoomSelection() {
     if (localTarget) {
       targetPassword = localTarget.password || '';
       targetDestroy = localTarget.destroy || 900;
+      targetCreatedAt = localTarget.createdAt || '';
     }
 
     // 同时查 Supabase（过滤 room_type === 'premium'，即时房间永远不在结果里）
     try {
       const { data: dbTarget } = await supabase
         .from('rooms')
-        .select('id, password, destroy_seconds, status')
+        .select('id, password, destroy_seconds, status, created_at')
         .eq('id', joinRoomId)
         .eq('room_type', 'premium')
         .maybeSingle();
       if (dbTarget) {
         targetPassword = dbTarget.password || targetPassword;
         targetDestroy = dbTarget.destroy_seconds || targetDestroy;
+        targetCreatedAt = (dbTarget as any).created_at || targetCreatedAt;
       }
     } catch { /* ignore - 使用本地记录 */ }
 
@@ -439,7 +443,14 @@ export default function PremiumRoomSelection() {
 
     setJoinLoading(false);
     // 标记加入也算活跃房间
-    upsertActivePremiumRoom({ id: joinRoomId, createdAt: new Date().toISOString(), destroySeconds: targetDestroy, role: 'member', password: joinPassword });
+    // 活跃倒计时必须以“房间创建时间”计算，不能用加入时间重置
+    upsertActivePremiumRoom({
+      id: joinRoomId,
+      createdAt: targetCreatedAt || new Date().toISOString(),
+      destroySeconds: targetDestroy,
+      role: 'member',
+      password: joinPassword,
+    });
     setActiveRooms(getActivePremiumRooms());
     navigate(`/premium-chat?roomId=${joinRoomId}&destroy=${targetDestroy}&password=${joinPassword}`);
   };

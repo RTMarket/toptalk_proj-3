@@ -33,6 +33,11 @@ function getActiveRoom(): ActiveRoom | null {
   } catch { return null; }
 }
 
+function setActiveRoomStorage(room: ActiveRoom | null) {
+  if (!room) localStorage.removeItem('toptalk_active_room')
+  else localStorage.setItem('toptalk_active_room', JSON.stringify(room))
+}
+
 // 判断用户是否是某房间的创建者（从 localStorage 中的 createdRooms 记录）
 function isRoomCreator(roomId: string): boolean {
   try {
@@ -136,14 +141,18 @@ export default function FreeRoomSelection() {
 
     // 第二步：Supabase 过滤即时房间（只查 room_type === 'instant'，高级房间永远不在结果里）
     let supabaseFound = false;
+    let supabaseCreatedAt: string | null = null;
     try {
       const { data } = await supabase
         .from('rooms')
-        .select('id, room_type')
+        .select('id, room_type, created_at')
         .eq('id', joinRoomId)
         .eq('room_type', 'instant')
         .maybeSingle();
-      if (data) supabaseFound = true;
+      if (data) {
+        supabaseFound = true;
+        supabaseCreatedAt = (data as any).created_at || null;
+      }
     } catch { /* ignore */ }
 
     if (!localFound && !supabaseFound) {
@@ -151,6 +160,13 @@ export default function FreeRoomSelection() {
     }
 
     setJoinLoading(false);
+    // 加入者同一时间只能加入一间：加入也写入活跃房间（离开页面会清掉）
+    // 活跃倒计时按“房间创建时间”计算
+    const createdAt = (localFound as any)?.createdAt || supabaseCreatedAt || new Date().toISOString()
+    const active: ActiveRoom = { id: joinRoomId, createdAt, destroySeconds: 900 };
+    setActiveRoomStorage(active);
+    setActiveRoom(active);
+    setActiveRoomRemaining(ROOM_DURATION_MS);
     navigate(`/free-chat?roomId=${joinRoomId}&destroy=900`);
   };
 

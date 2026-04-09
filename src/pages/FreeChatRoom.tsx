@@ -105,6 +105,24 @@ export default function FreeChatRoom() {
     };
   }, [roomId]);
 
+  // 关闭/离开页面：也算离开房间，并释放“活跃即时房间”占用
+  useEffect(() => {
+    if (!roomId || roomId === '——') return;
+    const release = () => {
+      try {
+        const raw = localStorage.getItem('toptalk_active_room');
+        if (raw) {
+          const active = JSON.parse(raw);
+          if (active?.id === roomId) localStorage.removeItem('toptalk_active_room');
+        }
+      } catch { /* ignore */ }
+      postRoomEvent({ roomId, roomType: 'instant', event: 'leave' }).catch(() => {});
+      try { channelRef.current?.unsubscribe(); } catch { /* ignore */ }
+    };
+    window.addEventListener('pagehide', release);
+    return () => window.removeEventListener('pagehide', release);
+  }, [roomId]);
+
   // ── 读取昵称 ────────────────────────────────────────
   useEffect(() => {
     try {
@@ -322,6 +340,13 @@ export default function FreeChatRoom() {
       localStorage.setItem('toptalk_left', JSON.stringify(leftRooms));
     } catch {}
     channelRef.current?.send({ type: 'broadcast', event: 'user_left', payload: { userId: userIdRef.current } });
+    try {
+      const activeRaw = localStorage.getItem('toptalk_active_room');
+      if (activeRaw) {
+        const active = JSON.parse(activeRaw);
+        if (active?.id === roomId) localStorage.removeItem('toptalk_active_room');
+      }
+    } catch {}
     setTimeout(() => { window.location.href = '/rooms'; }, 2000);
   };
 
