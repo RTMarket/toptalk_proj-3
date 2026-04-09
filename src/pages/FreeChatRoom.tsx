@@ -213,11 +213,15 @@ export default function FreeChatRoom() {
     channel.subscribe(async (status) => {
       if (status !== 'SUBSCRIBED') return;
       setRtStatus('ready');
-      await channel.track({
-        userId: uid,
-        roomId,
-        online_at: new Date().toISOString(),
-      });
+      try {
+        await channel.track({
+          userId: uid,
+          roomId,
+          online_at: new Date().toISOString(),
+        });
+      } catch {
+        // presence 失败不应影响收发消息；在线人数/排序会退化
+      }
       updatePresence();
     });
 
@@ -455,20 +459,11 @@ export default function FreeChatRoom() {
                 const remain = msgTimes[msg.id] ?? (msg.expireAt > 0 ? Math.max(0, msg.expireAt - Date.now()) : 0);
                 const expired = msg.expireAt > 0 && remain <= 0;
                 const progress = msg.destroySeconds > 0 ? Math.max(0, remain / (msg.destroySeconds * 1000)) : 1;
-                const senderId = msg.sender;
-                const joinIndex = (() => {
-                  const idx = userOrder.indexOf(senderId);
-                  return idx >= 0 ? idx : 0;
-                })();
-                const side = joinIndex % 2 === 0 ? 'right' : 'left';
-                const colorIdx = joinIndex % 4;
-                const bubbleClass = (() => {
-                  if (colorIdx === 0) return 'bg-gradient-to-br from-yellow-400/90 to-yellow-500/90 text-[#1a365d]';
-                  if (colorIdx === 1) return 'bg-white/10 border border-white/15 text-white';
-                  if (colorIdx === 2) return 'bg-blue-500/20 border border-blue-400/30 text-white';
-                  return 'bg-green-500/20 border border-green-400/30 text-white';
-                })();
-                const nameTextClass = colorIdx === 0 ? 'text-gray-700' : 'text-gray-500';
+                const side = isMine ? 'right' : 'left';
+                const bubbleClass = isMine
+                  ? 'bg-gradient-to-br from-yellow-400/90 to-yellow-500/90 text-[#1a365d]'
+                  : 'bg-white/10 border border-white/15 text-white';
+                const nameTextClass = isMine ? 'text-gray-700' : 'text-gray-500';
 
                 if (isSystem) {
                   return (

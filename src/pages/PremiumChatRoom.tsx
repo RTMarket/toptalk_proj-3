@@ -62,6 +62,22 @@ function formatRemain(ms: number): string {
   return `${s}秒`;
 }
 
+function durationLabelFromSeconds(seconds: number): string {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s === 900) return '15分钟';
+  if (s === 1800) return '30分钟';
+  if (s === 2700) return '45分钟';
+  if (s === 3600) return '1小时';
+  if (s === 4500) return '1小时15分';
+  if (s === 5400) return '1小时30分';
+  if (s === 7200) return '2小时';
+  if (s === 8100) return '2小时15分';
+  if (s === 9000) return '2小时30分';
+  if (s >= 3600) return `${Math.floor(s / 3600)}小时${Math.floor((s % 3600) / 60)}分`;
+  if (s >= 60) return `${Math.floor(s / 60)}分${s % 60}秒`;
+  return `${s}秒`;
+}
+
 function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-sm p-4" onClick={onClose}>
@@ -76,7 +92,7 @@ export default function PremiumChatRoom() {
   const [searchParams] = useSearchParams();
   const roomId = searchParams.get('roomId') || '------';
   const destroyParam = parseInt(searchParams.get('destroy') || '3600');
-  const durationLabel = searchParams.get('duration') ? decodeURIComponent(searchParams.get('duration')!) : '1小时';
+  const durationLabel = searchParams.get('duration') ? decodeURIComponent(searchParams.get('duration')!) : durationLabelFromSeconds(destroyParam);
 
   // dissolveBarRef and leaveBarRef removed — animation via CSS
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -84,6 +100,7 @@ export default function PremiumChatRoom() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [roomLeft, setRoomLeft] = useState(destroyParam);
+  const [roomMeta, setRoomMeta] = useState<{ createdAt: string; destroySeconds: number } | null>(null);
   const [onlineCount, setOnlineCount] = useState(1);
   const userIdRef = useRef(`u_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`);
   const nicknameRef = useRef('匿名用户');
@@ -170,6 +187,39 @@ export default function PremiumChatRoom() {
         if (cur?.role === 'member') removeActivePremiumRoom(roomId);
       } catch { /* ignore */ }
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId]);
+
+  // ── 房间元数据：按“创建时间 + 创建时长”计算剩余倒计时（加入者后进不应被重置）────────
+  useEffect(() => {
+    if (!roomId || roomId === '------') return;
+    let cancelled = false;
+    void (async () => {
+      // 1) 优先使用本地活跃房间记录（PremiumRoomSelection 已保证加入时读取 created_at / destroy_seconds）
+      try {
+        const local = getActivePremiumRooms().find(r => r.id === roomId);
+        if (local?.createdAt && Number.isFinite(local.destroySeconds)) {
+          if (!cancelled) setRoomMeta({ createdAt: local.createdAt, destroySeconds: Number(local.destroySeconds) || destroyParam || 0 });
+          return;
+        }
+      } catch { /* ignore */ }
+
+      // 2) fallback：从 Supabase rooms 表读取（避免本地缺失时倒计时错误）
+      try {
+        const { data } = await supabase
+          .from('rooms')
+          .select('created_at, destroy_seconds')
+          .eq('id', roomId)
+          .eq('room_type', 'premium')
+          .maybeSingle();
+        const createdAt = (data as any)?.created_at as string | undefined;
+        const destroySeconds = Number((data as any)?.destroy_seconds);
+        if (!cancelled && createdAt) {
+          setRoomMeta({ createdAt, destroySeconds: Number.isFinite(destroySeconds) && destroySeconds > 0 ? destroySeconds : (destroyParam || 0) });
+        }
+      } catch { /* ignore */ }
+    })();
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId]);
 
@@ -284,11 +334,19 @@ export default function PremiumChatRoom() {
     return () => window.clearTimeout(t);
   }, [roomId]);
 
-  // Room countdown
+  // Room countdown（以“创建时间”为基准计算，保证所有加入者看到一致的剩余时间）
   useEffect(() => {
-    const id = setInterval(() => setRoomLeft(l => Math.max(0, l - 1)), 1000);
-    return () => clearInterval(id);
-  }, []);
+    if (!roomMeta) return;
+    const tick = () => {
+      const createdMs = new Date(roomMeta.createdAt).getTime();
+      const totalMs = Math.max(0, (Number(roomMeta.destroySeconds) || 0) * 1000);
+      const remainMs = Math.max(0, createdMs + totalMs - Date.now());
+      setRoomLeft(Math.ceil(remainMs / 1000));
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [roomMeta]);
 
   // Room expired → overlay，并清空该房间在 DB 中的消息（阅后即焚不落库）
   useEffect(() => {
@@ -553,7 +611,17 @@ export default function PremiumChatRoom() {
       a.click();
       URL.revokeObjectURL(url);
     } catch {
-      window.open(href, '_blank', 'noopener,noreferrer');
+      // 兜底策略：
+      // - 某些移动端/跨域环境下 fetch(blob) 会失败，但直接打开链接可下载/预览
+      // - 若后端支持 ?download=1，可触发更稳定的下载行为
+      try {
+        const u = new URL(href);
+        // 不覆盖已有参数；仅在缺失时追加
+        if (!u.searchParams.has('download')) u.searchParams.set('download', '1');
+        window.open(u.toString(), '_blank', 'noopener,noreferrer');
+      } catch {
+        window.open(href, '_blank', 'noopener,noreferrer');
+      }
     }
   };
 
@@ -708,21 +776,11 @@ export default function PremiumChatRoom() {
           const remain = msgTimes[msg.id] ?? (msg.expireAt > 0 ? Math.max(0, msg.expireAt - Date.now()) : 0);
           const expired = msg.expireAt > 0 && remain <= 0;
           const progress = msg.destroySeconds > 0 ? Math.max(0, remain / (msg.destroySeconds * 1000)) : 1;
-          const senderId = msg.sender;
-          const joinIndex = (() => {
-            const idx = userOrder.indexOf(senderId);
-            return idx >= 0 ? idx : 0;
-          })();
-          const side = joinIndex % 2 === 0 ? 'right' : 'left';
-          const colorIdx = joinIndex % 4;
-          const bubbleClass = (() => {
-            // 0: yellow, 1: white, 2: blue, 3: green
-            if (colorIdx === 0) return 'bg-gradient-to-br from-yellow-400/90 to-yellow-500/90 text-[#1a365d]';
-            if (colorIdx === 1) return 'bg-white/10 border border-white/15 text-white';
-            if (colorIdx === 2) return 'bg-blue-500/20 border border-blue-400/30 text-white';
-            return 'bg-green-500/20 border border-green-400/30 text-white';
-          })();
-          const nameTextClass = colorIdx === 0 ? 'text-gray-700' : 'text-gray-500';
+          const side = isMine ? 'right' : 'left';
+          const bubbleClass = isMine
+            ? 'bg-gradient-to-br from-yellow-400/90 to-yellow-500/90 text-[#1a365d]'
+            : 'bg-white/10 border border-white/15 text-white';
+          const nameTextClass = isMine ? 'text-gray-700' : 'text-gray-500';
 
           if (isSystem) {
             return (
