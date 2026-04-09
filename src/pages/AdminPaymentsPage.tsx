@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import Navbar from '../components/layout/Navbar'
 import Footer from '../components/layout/Footer'
 import { pricingPlans } from '../data/pricingData'
-import { adminGenerateInviteCodes, GeneratedInviteCode } from '../lib/inviteCodeApi'
+
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 
