@@ -157,18 +157,27 @@ export default function PersonalCenterPage() {
         const days = getPlanDays(p);
         const purchasedMs = toMs(purchased);
         const expiresMs = toMs(expires);
-        if (days && purchasedMs) {
-          const expectedExpiresMs = purchasedMs + days * 86400000;
-          // 允许少量误差（时区/写入时差）
+        if (days) {
           const toleranceMs = 2 * 60 * 1000;
-          if (!expiresMs) {
-            expires = new Date(expectedExpiresMs).toISOString();
-            localStorage.setItem('toptalk_plan_expires', expires);
-            localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: p, expireAt: expires }));
-          } else if (expiresMs > expectedExpiresMs + toleranceMs || expiresMs < expectedExpiresMs - toleranceMs) {
-            expires = new Date(expectedExpiresMs).toISOString();
-            localStorage.setItem('toptalk_plan_expires', expires);
-            localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: p, expireAt: expires }));
+          // 如果缺少 purchasedAt，但 expiresAt 异常偏大（例如 58 天），按“现在生效”校准
+          const maxRemainingMs = days * 86400000 + toleranceMs;
+          if (!purchasedMs) {
+            const remainingMs = expiresMs ? Math.max(0, expiresMs - Date.now()) : 0;
+            if (!expiresMs || remainingMs > maxRemainingMs) {
+              const nowMs = Date.now();
+              purchased = new Date(nowMs).toISOString();
+              expires = new Date(nowMs + days * 86400000).toISOString();
+              localStorage.setItem('toptalk_plan_purchased', purchased);
+              localStorage.setItem('toptalk_plan_expires', expires);
+              localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: p, expireAt: expires }));
+            }
+          } else {
+            const expectedExpiresMs = purchasedMs + days * 86400000;
+            if (!expiresMs || expiresMs > expectedExpiresMs + toleranceMs || expiresMs < expectedExpiresMs - toleranceMs) {
+              expires = new Date(expectedExpiresMs).toISOString();
+              localStorage.setItem('toptalk_plan_expires', expires);
+              localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: p, expireAt: expires }));
+            }
           }
         }
       } catch { /* ignore */ }
