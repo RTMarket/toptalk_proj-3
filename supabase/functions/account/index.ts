@@ -89,6 +89,10 @@ function getBearer(req: Request): string {
   return h.slice(7).trim()
 }
 
+function normalizeInviteCode(raw: string): string {
+  return String(raw || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6)
+}
+
 async function requireSession(req: Request): Promise<{ ok: true; userId: string } | { ok: false; res: Response }> {
   const token = getBearer(req)
   if (!token) return { ok: false, res: json({ success: false, message: '未登录' }, 401) }
@@ -242,6 +246,62 @@ async function handleLogout(req: Request) {
   return json({ success: true })
 }
 
+const PLAN_EXPIRY_DAYS: Record<string, number> = {
+  daily: 1,
+  weekly: 7,
+  monthly: 30,
+  single: 3650,
+  enterprise: 30,
+  enterprise_pro: 30,
+}
+
+async function handleRedeemInvite(req: Request) {
+  const g = await requireSession(req)
+  if (!g.ok) return g.res
+
+  const body = await req.json().catch(() => ({}))
+  const code = normalizeInviteCode(body.code)
+  if (!/^[A-Z0-9]{6}$/.test(code)) return json({ success: false, message: '邀请码格式不正确' }, 400)
+
+  const { data: u } = await supabaseAdmin
+    .from('app_users')
+    .select('id, email, nickname')
+    .eq('id', g.userId)
+    .maybeSingle()
+
+  const { data: row, error: delErr } = await supabaseAdmin
+    .from('invite_codes')
+    .delete()
+    .eq('code', code)
+    .select('code, plan_id, created_at')
+    .maybeSingle()
+  if (delErr) return json({ success: false, message: delErr.message }, 500)
+  if (!row?.plan_id) return json({ success: false, message: 'notfound' }, 404)
+
+  const planId = String((row as any).plan_id || '')
+  const days = PLAN_EXPIRY_DAYS[planId] ?? 30
+  const nowMs = Date.now()
+  const purchasedAt = new Date(nowMs).toISOString()
+  const expiresAt = new Date(nowMs + days * 86400000).toISOString()
+
+  const { error: upErr } = await supabaseAdmin
+    .from('app_users')
+    .update({ plan_id: planId, plan_purchased_at: purchasedAt, plan_expires_at: expiresAt })
+    .eq('id', g.userId)
+  if (upErr) return json({ success: false, message: upErr.message }, 500)
+
+  await supabaseAdmin.from('invite_redemptions').insert({
+    code,
+    plan_id: planId,
+    user_id: g.userId,
+    user_email: (u as any)?.email || null,
+    user_nickname: (u as any)?.nickname || null,
+    redeemed_at: purchasedAt,
+  })
+
+  return json({ success: true, planId, purchasedAt, expiresAt })
+}
+
 async function handleResetConfirm(req: Request) {
   const body = await req.json().catch(() => ({}))
   const email = normalizeEmail(body.email)
@@ -379,6 +439,7 @@ serve(async (req: Request) => {
     if (req.method === 'POST' && path === 'login') return await handleLogin(req)
     if (req.method === 'GET' && path === 'me') return await handleMe(req)
     if (req.method === 'POST' && path === 'logout') return await handleLogout(req)
+    if (req.method === 'POST' && (path === 'redeem-invite' || url.pathname.endsWith('/redeem-invite'))) return await handleRedeemInvite(req)
     if (req.method === 'POST' && path === 'reset-confirm') return await handleResetConfirm(req)
     if (req.method === 'POST' && path === 'events') return await handleEvents(req)
     return json({ message: 'Not found' }, 404)

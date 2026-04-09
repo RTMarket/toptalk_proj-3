@@ -35,10 +35,20 @@ function getAdminToken(): string {
   return sessionStorage.getItem('toptalk_admin_token') || localStorage.getItem('toptalk_admin_token') || ''
 }
 
+type InviteRedemptionRow = {
+  id: number
+  code: string
+  plan_id: string
+  user_email?: string | null
+  user_nickname?: string | null
+  redeemed_at?: string | null
+}
+
 export default function AdminPaymentsPage() {
   const navigate = useNavigate()
   const [adminToken, setAdminToken] = useState('')
   const [status, setStatus] = useState<OrderStatus>('pending')
+  const [panel, setPanel] = useState<'bank' | 'invite'>('bank')
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState('')
   const [info, setInfo] = useState('')
@@ -52,7 +62,11 @@ export default function AdminPaymentsPage() {
   const [usageErr, setUsageErr] = useState('')
   const [usageData, setUsageData] = useState<any | null>(null)
 
-  // 邀请码采用 Supabase SQL 预生成方式补货（见页面说明）
+  const [inviteLoading, setInviteLoading] = useState(false)
+  const [inviteErr, setInviteErr] = useState('')
+  const [inviteCounts, setInviteCounts] = useState<Record<string, number>>({})
+  const [inviteRows, setInviteRows] = useState<InviteRedemptionRow[]>([])
+
   useEffect(() => {
     const t = getAdminToken()
     if (!t) {
@@ -95,11 +109,57 @@ export default function AdminPaymentsPage() {
     }
   }
 
+  const fetchInviteInventory = async () => {
+    if (!SUPABASE_URL) return
+    const t = adminToken.trim() || getAdminToken()
+    if (!t) return
+    setInviteErr('')
+    setInviteLoading(true)
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/bank-transfer-order/invite-inventory`, {
+        headers: { Authorization: `Bearer ${t}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.success) throw new Error(data?.message || `请求失败（HTTP ${res.status}）`)
+      setInviteCounts((data.counts || {}) as Record<string, number>)
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '加载失败'
+      setInviteErr(msg)
+    } finally {
+      setInviteLoading(false)
+    }
+  }
+
+  const fetchInviteRedemptions = async () => {
+    if (!SUPABASE_URL) return
+    const t = adminToken.trim() || getAdminToken()
+    if (!t) return
+    setInviteErr('')
+    setInviteLoading(true)
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/bank-transfer-order/invite-redemptions`, {
+        headers: { Authorization: `Bearer ${t}` },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data?.success) throw new Error(data?.message || `请求失败（HTTP ${res.status}）`)
+      setInviteRows((data.rows || []) as InviteRedemptionRow[])
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '加载失败'
+      setInviteErr(msg)
+    } finally {
+      setInviteLoading(false)
+    }
+  }
+
   useEffect(() => {
     if (!canQuery) return
-    fetchOrders()
+    if (panel === 'bank') fetchOrders()
+    else {
+      void fetchInviteInventory()
+      void fetchInviteRedemptions()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, adminToken])
+  }, [status, adminToken, panel])
 
   const act = async (order: PaymentOrder, action: 'approve' | 'reject', remark?: string) => {
     if (!SUPABASE_URL) return
@@ -213,11 +273,14 @@ export default function AdminPaymentsPage() {
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
-              onClick={fetchOrders}
-              disabled={loading}
+              onClick={() => {
+                if (panel === 'bank') fetchOrders()
+                else { void fetchInviteInventory(); void fetchInviteRedemptions() }
+              }}
+              disabled={loading || inviteLoading}
               className="bg-yellow-400 hover:bg-yellow-300 text-[#1a365d] font-bold px-5 py-2.5 rounded-xl text-sm disabled:opacity-60"
             >
-              {loading ? '加载中...' : '刷新列表'}
+              {(loading || inviteLoading) ? '加载中...' : '刷新列表'}
             </button>
             <button
               type="button"
@@ -229,17 +292,16 @@ export default function AdminPaymentsPage() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex flex-wrap items-center gap-2 mb-4">
           {([
-            { id: 'pending', label: '待审核' },
-            { id: 'approved', label: '已通过' },
-            { id: 'rejected', label: '已拒绝' },
+            { id: 'bank', label: '转账订单审核' },
+            { id: 'invite', label: '邀请码兑换统计' },
           ] as const).map(t => (
             <button
               key={t.id}
-              onClick={() => setStatus(t.id)}
+              onClick={() => setPanel(t.id)}
               className={`px-4 py-2 rounded-xl text-sm border transition-colors ${
-                status === t.id
+                panel === t.id
                   ? 'bg-yellow-400/15 text-yellow-300 border-yellow-400/30'
                   : 'bg-white/5 text-gray-400 border-white/10 hover:text-white hover:border-white/20'
               }`}
@@ -247,6 +309,28 @@ export default function AdminPaymentsPage() {
               {t.label}
             </button>
           ))}
+
+          {panel === 'bank' && (
+            <div className="flex items-center gap-2">
+              {([
+                { id: 'pending', label: '待审核' },
+                { id: 'approved', label: '已通过' },
+                { id: 'rejected', label: '已拒绝' },
+              ] as const).map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setStatus(t.id)}
+                  className={`px-4 py-2 rounded-xl text-sm border transition-colors ${
+                    status === t.id
+                      ? 'bg-yellow-400/15 text-yellow-300 border-yellow-400/30'
+                      : 'bg-white/5 text-gray-400 border-white/10 hover:text-white hover:border-white/20'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {info && (
@@ -261,36 +345,90 @@ export default function AdminPaymentsPage() {
           </div>
         )}
 
-        {/* 邀请码（预生成/补货）说明 */}
-        <div className="bg-white/5 border border-white/10 rounded-2xl p-6 mb-5">
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <h2 className="text-white font-bold text-lg">邀请码（预生成方式）</h2>
-              <p className="text-gray-500 text-sm mt-1">
-                当前采用在 Supabase SQL Editor 中按套餐批量插入邀请码的方式补货；用户兑换成功后邀请码会被删除。
-              </p>
+        {panel === 'invite' && (
+          <div className="space-y-5">
+            {inviteErr && (
+              <div className="bg-red-900/30 border border-red-500/40 rounded-xl p-4 text-red-400 text-sm">
+                ❌ {inviteErr}
+              </div>
+            )}
+
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <h2 className="text-white font-bold text-lg">邀请码库存（无需审核）</h2>
+                  <p className="text-gray-500 text-sm mt-1">展示当前未使用的邀请码数量（按套餐统计）</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fetchInviteInventory()}
+                  disabled={inviteLoading}
+                  className="bg-white/10 hover:bg-white/15 border border-white/15 text-white px-4 py-2.5 rounded-xl text-sm disabled:opacity-60"
+                >
+                  {inviteLoading ? '加载中...' : '刷新库存'}
+                </button>
+              </div>
+              <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+                {pricingPlans.filter(p => p.id !== 'free').map(p => (
+                  <div key={p.id} className="bg-white/3 border border-white/10 rounded-xl p-4">
+                    <div className="text-gray-500 text-xs mb-2">{p.name}</div>
+                    <div className="text-white font-bold text-lg">{inviteCounts[p.id] ?? 0}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-6">
+              <div className="flex items-start justify-between gap-4 flex-wrap">
+                <div>
+                  <h2 className="text-white font-bold text-lg">邀请码兑换记录</h2>
+                  <p className="text-gray-500 text-sm mt-1">用户兑换成功后自动生效，无需审核</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fetchInviteRedemptions()}
+                  disabled={inviteLoading}
+                  className="bg-white/10 hover:bg-white/15 border border-white/15 text-white px-4 py-2.5 rounded-xl text-sm disabled:opacity-60"
+                >
+                  {inviteLoading ? '加载中...' : '刷新记录'}
+                </button>
+              </div>
+
+              <div className="mt-4 bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-white/5">
+                    <tr className="border-b border-white/10">
+                      {['兑换时间', '邮箱', '昵称', '套餐', '邀请码'].map(h => (
+                        <th key={h} className="text-left px-5 py-3 text-gray-500 text-xs font-medium">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inviteRows.map(r => (
+                      <tr key={String(r.id)} className="border-b border-white/5 last:border-0 hover:bg-white/3">
+                        <td className="px-5 py-3.5 text-gray-500">{formatTime(String(r.redeemed_at || ''))}</td>
+                        <td className="px-5 py-3.5 text-gray-300">{r.user_email || '—'}</td>
+                        <td className="px-5 py-3.5 text-gray-400">{r.user_nickname || '—'}</td>
+                        <td className="px-5 py-3.5 text-gray-200">{pricingPlans.find(p => p.id === r.plan_id)?.name || r.plan_id}</td>
+                        <td className="px-5 py-3.5 text-white font-mono tracking-widest">{r.code}</td>
+                      </tr>
+                    ))}
+                    {inviteRows.length === 0 && (
+                      <tr>
+                        <td colSpan={5} className="px-5 py-10 text-center text-gray-600">
+                          {inviteLoading ? '加载中...' : '暂无兑换记录'}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
-
-          <div className="mt-4 bg-black/20 border border-white/10 rounded-xl p-4 text-xs text-gray-400 leading-relaxed">
-            <div className="mb-2 text-gray-300 font-medium">示例 SQL（每个套餐各生成 100 个）</div>
-            <pre className="whitespace-pre-wrap break-words">{`insert into public.invite_codes (code, plan_id)
-select substring(upper(md5(random()::text || clock_timestamp()::text)) from 1 for 6) as code,
-       p.plan_id
-from (
-  select 'single' as plan_id union all
-  select 'daily' union all
-  select 'weekly' union all
-  select 'monthly' union all
-  select 'enterprise' union all
-  select 'enterprise_pro'
-) p
-cross join generate_series(1, 120) g
-on conflict (code) do nothing;`}</pre>
-          </div>
-        </div>
+        )}
 
         {/* 用户使用情况（按邮箱） */}
+        {panel === 'bank' && (
         <div className="bg-white/5 border border-white/10 rounded-2xl p-4 mb-5">
           <div className="flex flex-wrap items-end gap-3">
             <div className="flex-1 min-w-[240px]">
@@ -335,7 +473,9 @@ on conflict (code) do nothing;`}</pre>
             </div>
           )}
         </div>
+        )}
 
+        {panel === 'bank' && (
         <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
           <table className="w-full text-sm">
             <thead className="bg-white/5">
@@ -438,8 +578,9 @@ on conflict (code) do nothing;`}</pre>
             </tbody>
           </table>
         </div>
+        )}
 
-        {selected?.bank_transfer_screenshot_url && (
+        {panel === 'bank' && selected?.bank_transfer_screenshot_url && (
           <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setSelected(null)}>
             <div className="max-w-3xl w-full bg-[#0b1730] border border-white/10 rounded-2xl overflow-hidden" onClick={e => e.stopPropagation()}>
               <div className="flex items-center justify-between px-5 py-3 border-b border-white/10">

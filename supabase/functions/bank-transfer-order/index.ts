@@ -377,6 +377,37 @@ async function handleUserUsage(req: Request) {
   }
 }
 
+// ── GET /invite-redemptions: 管理员查看邀请码兑换记录 ────────────────
+async function handleInviteRedemptions(req: Request) {
+  const admin = requireAdmin(req)
+  if (!admin.ok) return admin.res
+  const { data, error } = await supabaseAdmin
+    .from('invite_redemptions')
+    .select('id, code, plan_id, user_email, user_nickname, redeemed_at')
+    .order('redeemed_at', { ascending: false })
+    .limit(100)
+  if (error) return json({ success: false, message: error.message }, 500)
+  return json({ success: true, rows: data || [] })
+}
+
+// ── GET /invite-inventory: 管理员查看邀请码库存（按套餐）───────────────
+async function handleInviteInventory(req: Request) {
+  const admin = requireAdmin(req)
+  if (!admin.ok) return admin.res
+  const { data, error } = await supabaseAdmin
+    .from('invite_codes')
+    .select('plan_id')
+    .limit(5000)
+  if (error) return json({ success: false, message: error.message }, 500)
+  const counts: Record<string, number> = {}
+  for (const r of data || []) {
+    const pid = String((r as any)?.plan_id || '')
+    if (!pid) continue
+    counts[pid] = (counts[pid] || 0) + 1
+  }
+  return json({ success: true, counts })
+}
+
 // ── 路由 ────────────────────────────────────────────────────
 serve(async (req: Request) => {
   // 处理 CORS preflight
@@ -400,6 +431,8 @@ serve(async (req: Request) => {
     if (req.method === 'POST' && path === 'delete') return await handleDelete(req)
     if (req.method === 'GET' && path === 'check-order') return await handleCheckOrder(req)
     if (req.method === 'GET' && path === 'user-usage') return await handleUserUsage(req)
+    if (req.method === 'GET' && path === 'invite-redemptions') return await handleInviteRedemptions(req)
+    if (req.method === 'GET' && path === 'invite-inventory') return await handleInviteInventory(req)
     return json({ message: 'Not found' }, 404)
   } catch (e: any) {
     return json({ success: false, message: e.message }, 500)
