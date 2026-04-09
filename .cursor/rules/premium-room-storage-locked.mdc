@@ -1,0 +1,26 @@
+---
+description: 高级聊天室文件上传（方案 A：Supabase Storage SQL + 上传代码）已锁定，改动前须征得用户同意
+globs: supabase/sql/premium_room_storage.sql,src/lib/premiumRoomStorage.ts,api/premium-upload-sign.ts,src/pages/PremiumChatRoom.tsx
+alwaysApply: true
+---
+
+# 高级聊天室 Storage / 上传 — 已确认锁定（方案 A）
+
+用户已确认：在 Supabase 执行 `supabase/sql/premium_room_storage.sql` 后，**文件上传已正常工作**。以下视为**稳定区**，**禁止擅自修改、重构或「顺手优化」**。
+
+## 锁定范围
+
+- `supabase/sql/premium_room_storage.sql`：桶名、RLS 策略、公开读逻辑；勿在未说明后果的情况下改策略或桶名。
+- `src/lib/premiumRoomStorage.ts`：上传顺序（签名 API → 回退直连）、桶名解析、错误处理。
+- `api/premium-upload-sign.ts`（若存在）：服务端签名上传；勿在未授权时删除或改行为。
+- `src/pages/PremiumChatRoom.tsx` 中与**文件选择、上传、下载、allowDownload** 相关的逻辑。
+
+## 必须遵守
+
+1. **任何**对上述文件的改动，须先向用户说明：**为什么要改、改什么、风险是什么**，并得到**明确同意**后再动。
+2. 若用户提出新需求（例如改桶名、改用私有桶、改下载方式），视为**新任务**：先评估是否影响线上已跑通的方案 A，再改。
+3. 不要为「整洁」删除 SQL 中的 `DROP POLICY` / 策略名；不要改默认桶 `premium-room-files` 除非用户要求并同步 Supabase + 环境变量。
+
+## 例外（仍需谨慎）
+
+- 仅修复**明确 bug**（且可复现）时，可最小范围修改，并在回复中**逐条说明**改了哪几行、为何不影响方案 A。
