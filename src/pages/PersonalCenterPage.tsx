@@ -130,7 +130,12 @@ export default function PersonalCenterPage() {
   useEffect(() => {
     const loadUser = () => {
       const stored = localStorage.getItem('toptalk_user');
-      const p = localStorage.getItem('toptalk_plan') || 'free';
+      // planId 以 localStorage 为准，但必须是已知 id；否则一律回退 free（避免出现“58天”等异常显示）
+      let p = (localStorage.getItem('toptalk_plan') || 'free').trim();
+      try {
+        const known = new Set(pricingPlans.map(x => x.id));
+        if (!known.has(p)) p = 'free';
+      } catch { /* ignore */ }
       // 兼容多来源：toptalk_plan_* / toptalk_subscription / toptalk_user 字段
       let purchased = localStorage.getItem('toptalk_plan_purchased') || '';
       let expires = localStorage.getItem('toptalk_plan_expires') || '';
@@ -148,6 +153,17 @@ export default function PersonalCenterPage() {
           const subRaw = localStorage.getItem('toptalk_subscription');
           const sub = subRaw ? JSON.parse(subRaw) : null;
           expires = String(sub?.expireAt || sub?.expiresAt || '');
+        } catch { /* ignore */ }
+      }
+
+      // 免费版：不显示任何有效期（清掉遗留的 plan 时间字段，避免误显示）
+      if (p === 'free') {
+        purchased = '';
+        expires = '';
+        try {
+          localStorage.removeItem('toptalk_plan_purchased');
+          localStorage.removeItem('toptalk_plan_expires');
+          localStorage.removeItem('toptalk_subscription');
         } catch { /* ignore */ }
       }
 

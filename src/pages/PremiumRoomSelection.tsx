@@ -609,7 +609,9 @@ export default function PremiumRoomSelection() {
               <div className="text-center mb-5">
                 <div className="w-14 h-14 rounded-2xl bg-yellow-400/20 border border-yellow-400/30 flex items-center justify-center text-3xl mx-auto mb-3">🔐</div>
                 <h2 className="text-white font-bold text-lg mb-1">解锁创建高级房间</h2>
-                <p className="text-gray-500 text-sm">订阅后可创建房间；已登录用户也可凭房间号与密码加入他人高级聊天室（左侧）</p>
+                <p className="text-gray-500 text-sm">
+                  仅订阅用户可创建高级聊天室；已登录用户也可凭房间号与密码加入他人高级聊天室（左侧）。
+                </p>
               </div>
               <div className="space-y-2 mb-5">
                 {['文字+文件+图片消息', '阅后即焚（最长2.5小时）', '房间密码保护'].map((f, i) => (
@@ -617,11 +619,17 @@ export default function PremiumRoomSelection() {
                 ))}
               </div>
               <button
-                onClick={() => setShowPricing(true)}
+                onClick={() => {
+                  if (!loggedIn) navigate('/login');
+                  else navigate('/personal-center');
+                }}
                 className="w-full bg-gradient-to-r from-yellow-400 to-amber-500 hover:from-yellow-300 hover:to-amber-400 text-[#1a365d] font-bold py-3 rounded-xl text-sm transition-all"
               >
-                ¥9.9起 · 立即订阅
+                去个人中心输入邀请码开通套餐
               </button>
+              <p className="text-center text-gray-700 text-xs mt-3">
+                {loggedIn ? '已登录：进入个人中心 → 输入邀请码即可开通。' : '未登录：请先登录后再去个人中心开通套餐。'}
+              </p>
             </div>
           )}
         </div>
