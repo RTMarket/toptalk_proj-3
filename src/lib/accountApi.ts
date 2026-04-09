@@ -3,7 +3,14 @@ import { normalizeClientAnonKey } from './anonKey'
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
 const ANON_KEY = normalizeClientAnonKey(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)
 
-export type AppUser = { id: string; email: string; nickname: string }
+export type AppUser = {
+  id: string
+  email: string
+  nickname: string
+  plan?: string
+  planPurchasedAt?: string
+  planExpiresAt?: string
+}
 
 function apiBase() {
   return `${SUPABASE_URL}/functions/v1/account`

@@ -5,6 +5,7 @@ import { pricingPlans } from '../data/pricingData';
 import { Link, useSearchParams } from 'react-router-dom';
 import { clampNickname, isValidNickname, NICKNAME_MAX_LEN } from '../lib/nickname';
 import { isValidInviteCode, normalizeInviteCode, redeemInviteCode } from '../lib/inviteCodeApi';
+import { accountMe } from '../lib/accountApi';
 
 const planLabels: Record<string, string> = {
   free: '免费版', single: '单次高级', daily: '日卡', weekly: '周卡',
@@ -203,6 +204,50 @@ export default function PersonalCenterPage() {
       setPlan(p); setPlanPurchasedAt(purchased); setPlanExpiresAt(expires);
     };
     loadUser();
+
+    // 规则：个人中心以服务端为准做一次订阅状态同步（跨设备一致；换套餐按最新套餐的 purchasedAt/expiresAt 计算）
+    void (async () => {
+      try {
+        const me = await accountMe();
+        const nextPlan = (me?.plan || 'free').trim() || 'free';
+        const nextPurchasedAt = String(me?.planPurchasedAt || '');
+        const nextExpiresAt = String(me?.planExpiresAt || '');
+
+        // 后端 free / 空 → 清掉本地订阅缓存
+        if (nextPlan === 'free' || !nextExpiresAt) {
+          try {
+            localStorage.setItem('toptalk_plan', 'free');
+            localStorage.removeItem('toptalk_plan_purchased');
+            localStorage.removeItem('toptalk_plan_expires');
+            localStorage.removeItem('toptalk_subscription');
+          } catch { /* ignore */ }
+        } else {
+          try {
+            localStorage.setItem('toptalk_plan', nextPlan);
+            if (nextPurchasedAt) localStorage.setItem('toptalk_plan_purchased', nextPurchasedAt);
+            localStorage.setItem('toptalk_plan_expires', nextExpiresAt);
+            localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: nextPlan, expireAt: nextExpiresAt }));
+          } catch { /* ignore */ }
+        }
+
+        // 同步 user 信息（不影响登录态）
+        try {
+          const raw = localStorage.getItem('toptalk_user');
+          const u = raw ? JSON.parse(raw) : {};
+          u.plan = nextPlan;
+          u.planPurchasedAt = nextPurchasedAt;
+          u.planExpiresAt = nextExpiresAt;
+          localStorage.setItem('toptalk_user', JSON.stringify(u));
+        } catch { /* ignore */ }
+
+        window.dispatchEvent(new Event('storage'));
+        window.dispatchEvent(new Event('toptalk_login'));
+        loadUser();
+      } catch {
+        // ignore: 未登录/会话过期/后端未部署时，仍以本地缓存展示
+      }
+    })();
+
     const h = () => loadUser();
     window.addEventListener('toptalk_login', h);
     window.addEventListener('storage', h);

@@ -228,11 +228,24 @@ async function handleMe(req: Request) {
   if (!g.ok) return g.res
   const { data, error } = await supabaseAdmin
     .from('app_users')
-    .select('id, email, nickname, created_at, last_login_at, login_count')
+    .select('id, email, nickname, created_at, last_login_at, login_count, plan_id, plan_purchased_at, plan_expires_at')
     .eq('id', g.userId)
     .single()
   if (error) return json({ success: false, message: error.message }, 500)
-  return json({ success: true, user: data })
+  return json({
+    success: true,
+    user: {
+      id: data.id,
+      email: data.email,
+      nickname: data.nickname,
+      createdAt: (data as any).created_at ?? null,
+      lastLoginAt: (data as any).last_login_at ?? null,
+      loginCount: (data as any).login_count ?? 0,
+      plan: String((data as any).plan_id || 'free'),
+      planPurchasedAt: String((data as any).plan_purchased_at || ''),
+      planExpiresAt: String((data as any).plan_expires_at || ''),
+    },
+  })
 }
 
 async function handleLogout(req: Request) {
