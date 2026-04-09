@@ -311,7 +311,7 @@ export default function AdminPaymentsPage() {
           ))}
 
           {panel === 'bank' && (
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 max-w-full overflow-x-auto">
               {([
                 { id: 'pending', label: '待审核' },
                 { id: 'approved', label: '已通过' },
@@ -395,6 +395,7 @@ export default function AdminPaymentsPage() {
               </div>
 
               <div className="mt-4 bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+                <div className="w-full overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-white/5">
                     <tr className="border-b border-white/10">
@@ -422,6 +423,7 @@ export default function AdminPaymentsPage() {
                     )}
                   </tbody>
                 </table>
+                </div>
               </div>
             </div>
           </div>
@@ -477,6 +479,7 @@ export default function AdminPaymentsPage() {
 
         {panel === 'bank' && (
         <div className="bg-white/5 border border-white/10 rounded-2xl overflow-hidden">
+          <div className="w-full overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-white/5">
               <tr className="border-b border-white/10">
@@ -577,6 +580,7 @@ export default function AdminPaymentsPage() {
               )}
             </tbody>
           </table>
+          </div>
         </div>
         )}
 

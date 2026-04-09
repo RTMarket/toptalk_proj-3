@@ -19,6 +19,13 @@
     letter-spacing: 0.01em;
   }
 
+  /* 防止移动端横向溢出导致“只能看到一部分” */
+  html, body, #root {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
   /* 确保中文字符有足够的行高 */
   p, h1, h2, h3, h4, h5, h6 {
     line-height: 1.75;

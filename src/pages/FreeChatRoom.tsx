@@ -362,7 +362,7 @@ export default function FreeChatRoom() {
 
       {/* ── 房间信息栏（非sticky，贴着对话框顶部） ── */}
       <div className="bg-[#071525]/95 border-b border-yellow-400/20 flex-shrink-0" style={{ marginTop: 64 }}>
-        <div className="max-w-4xl mx-auto px-4 py-3">
+        <div className="max-w-4xl mx-auto px-3 sm:px-4 py-3">
           <div className="flex items-center justify-between gap-3 flex-wrap">
 
             {/* 左侧：房间信息 */}
@@ -389,12 +389,12 @@ export default function FreeChatRoom() {
             <div className="flex items-center gap-2 flex-shrink-0">
               {isCreator && (
                 <button onClick={() => setShowDissolveConfirm(true)}
-                  className="flex items-center gap-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-400 text-xs px-3 py-1.5 rounded-lg transition-colors font-medium">
+                  className="flex items-center gap-1.5 bg-red-500/20 hover:bg-red-500/30 border border-red-500/40 text-red-400 text-xs px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors font-medium">
                   🔴 解散房间
                 </button>
               )}
               <button onClick={() => setShowLeaveConfirm(true)}
-                className="flex items-center gap-1.5 bg-white/8 hover:bg-white/12 border border-white/15 text-gray-300 hover:text-white text-xs px-3 py-1.5 rounded-lg transition-colors">
+                className="flex items-center gap-1.5 bg-white/8 hover:bg-white/12 border border-white/15 text-gray-300 hover:text-white text-xs px-2.5 sm:px-3 py-1.5 rounded-lg transition-colors">
                 🚪 离开房间
               </button>
             </div>
@@ -403,13 +403,13 @@ export default function FreeChatRoom() {
       </div>
 
       {/* ── 对话框（正方形边框，可滚动） ── */}
-      <div className="flex-1 overflow-auto px-4 py-6">
+      <div className="flex-1 overflow-auto px-3 sm:px-4 py-4 sm:py-6">
         <div className="max-w-4xl mx-auto">
           {/* 正方形对话框容器 */}
-          <div className="bg-[#071525] border-2 border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col" style={{ minHeight: 'calc(100vh - 240px)', maxHeight: 'calc(100vh - 200px)' }}>
+          <div className="bg-[#071525] border-2 border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col" style={{ minHeight: 'calc(100vh - 220px)', maxHeight: 'calc(100vh - 180px)' }}>
 
             {/* 消息列表（可滚动） */}
-            <div className="flex-1 overflow-auto px-5 py-4 space-y-3">
+            <div className="flex-1 overflow-auto px-3 sm:px-5 py-4 space-y-3">
               {messages.map(msg => {
                 const isMine = msg.sender === userIdRef.current;
                 const isSystem = msg.sender === 'system';

@@ -222,14 +222,14 @@ export default function PersonalCenterPage() {
   return (
     <div className="min-h-screen bg-[#050d1a] text-white">
       <Navbar />
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-28 pb-16">
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 pt-24 sm:pt-28 pb-16">
 
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-white mb-1">个人中心</h1>
           <p className="text-gray-500">管理您的账户信息、套餐状态和账户安全</p>
         </div>
 
-        <div className="flex gap-2 mb-8 bg-white/5 border border-white/10 rounded-2xl p-1.5 w-fit">
+        <div className="flex gap-2 mb-8 bg-white/5 border border-white/10 rounded-2xl p-1.5 w-fit max-w-full overflow-x-auto">
           {tabs.map(t => (
             <button key={t.id} onClick={() => setActiveTab(t.id)}
               className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${activeTab === t.id ? 'bg-yellow-400/15 text-yellow-400 shadow-sm' : 'text-gray-500 hover:text-white hover:bg-white/5'}`}>

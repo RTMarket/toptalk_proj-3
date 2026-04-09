@@ -40,10 +40,10 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#050d1a] flex items-center justify-center px-6 py-16">
+    <div className="min-h-screen bg-[#050d1a] flex items-center justify-center px-4 sm:px-6 py-12 sm:py-16">
       <div className="w-full max-w-lg">
         {/* Logo */}
-        <div className="text-center mb-12">
+        <div className="text-center mb-10 sm:mb-12">
           <Link to="/" className="inline-flex items-center gap-3">
             <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-yellow-400 to-yellow-600 flex items-center justify-center text-white font-bold text-2xl shadow-lg shadow-yellow-500/20">T</div>
             <span className="text-2xl font-bold text-white">Top<span className="text-yellow-400">Talk</span></span>
@@ -51,8 +51,8 @@ export default function LoginPage() {
         </div>
 
         {/* Login Form Card */}
-        <div className="bg-white/5 border border-white/15 rounded-3xl p-10 backdrop-blur-sm">
-          <h1 className="text-3xl font-bold text-white mb-3 tracking-wide">登录账户</h1>
+        <div className="bg-white/5 border border-white/15 rounded-3xl p-6 sm:p-10 backdrop-blur-sm">
+          <h1 className="text-2xl sm:text-3xl font-bold text-white mb-3 tracking-wide">登录账户</h1>
           <p className="text-gray-500 mb-8">欢迎回来！请输入您的账户信息</p>
 
           <form onSubmit={handleSubmit} className="space-y-6">

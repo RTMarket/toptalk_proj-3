@@ -231,10 +231,10 @@ export default function FreeRoomSelection() {
     <div className="min-h-screen bg-[#050d1a] flex flex-col">
       <Navbar />
 
-      <div className="flex-1 flex flex-col justify-center max-w-5xl mx-auto px-5 pt-28 pb-10 space-y-8 w-full">
+      <div className="flex-1 flex flex-col justify-center max-w-5xl mx-auto px-4 sm:px-5 pt-24 sm:pt-28 pb-10 space-y-8 w-full">
 
         <div className="text-center">
-          <h1 className="text-4xl font-extrabold text-white mb-2">聊天室</h1>
+          <h1 className="text-3xl sm:text-4xl font-extrabold text-white mb-2">聊天室</h1>
           <p className="text-gray-500 text-sm">创建或进入安全私密聊天室</p>
         </div>
 
@@ -367,7 +367,7 @@ export default function FreeRoomSelection() {
                   <span className="text-white text-sm font-medium">即时聊天室</span>
                   <span className="bg-orange-400/20 text-orange-400 text-xs px-2 py-0.5 rounded-full border border-orange-400/25">进行中</span>
                 </div>
-                <span className="text-gray-400 text-sm font-mono">#{activeRoom.id}</span>
+                <span className="text-gray-400 text-sm font-mono truncate">#{activeRoom.id}</span>
                 <div className="flex items-center justify-end gap-2">
                   <svg className="w-3.5 h-3.5 text-orange-400 animate-pulse" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />

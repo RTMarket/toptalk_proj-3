@@ -122,7 +122,7 @@ export default function RegisterPage() {
     };
 
     return (
-        <div className="min-h-screen bg-[#050d1a] flex items-center justify-center px-6 py-16">
+        <div className="min-h-screen bg-[#050d1a] flex items-center justify-center px-4 sm:px-6 py-12 sm:py-16">
             <div className="w-full max-w-lg">
                 <div className="flex justify-center mb-8">
                     <Link to="/" className="flex items-center gap-3">
@@ -131,8 +131,8 @@ export default function RegisterPage() {
                     </Link>
                 </div>
 
-                <div className="bg-white/5 border border-white/15 rounded-3xl p-10 backdrop-blur-sm">
-                    <h1 className="text-3xl font-bold text-white mb-3 tracking-wide">注册账户</h1>
+                <div className="bg-white/5 border border-white/15 rounded-3xl p-6 sm:p-10 backdrop-blur-sm">
+                    <h1 className="text-2xl sm:text-3xl font-bold text-white mb-3 tracking-wide">注册账户</h1>
                     <p className="text-gray-500 mb-8">创建账户，开始使用 TopTalk</p>
 
                     {blockedByLogin && (
