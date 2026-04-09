@@ -4,6 +4,7 @@ import { supabase, supabaseConfigHint, supabaseConfigOk } from '../lib/supabase'
 import Navbar from '../components/layout/Navbar';
 import { postRoomEvent } from '../lib/accountApi';
 import { INSTANT_ROOM_SECONDS, isNavigationReload, isRoomWallClockExpired } from '../lib/roomConstants';
+import { newMessageRowId } from '../lib/messageRowId';
 
 interface Message {
   id: string;
@@ -381,6 +382,7 @@ export default function FreeChatRoom() {
 
     // 持久化到 Supabase
     supabase.from('messages').insert({
+      id: newMessageRowId(),
       room_id: `free_${roomId}`,
       sender_id: userIdRef.current,
       sender_name: nicknameRef.current,

@@ -1,4 +1,12 @@
 import { supabase } from './supabase'
+import { newMessageRowId } from './messageRowId'
+
+/** 与页面 URL roomId 一致，避免首尾空格导致 premium_xxx 与写入不一致 */
+export function premiumMessagesRoomKey(roomId: string): string {
+  const id = String(roomId ?? '').trim()
+  if (!id || id === '------') return ''
+  return `premium_${id}`
+}
 
 /** 若表 `messages.type` 不允许 `file`，则用 `text` + 此前缀存文件元数据 JSON */
 export const PREMIUM_FILE_CONTENT_PREFIX = '__TOPFILE__'
@@ -100,10 +108,13 @@ export async function fetchPremiumRoomMessagesFromDb(
   roomId: string,
   myUserId: string
 ): Promise<PremiumDbMessageShape[]> {
+  const key = premiumMessagesRoomKey(roomId)
+  if (!key) return []
+
   const { data, error } = await supabase
     .from('messages')
     .select('id, sender_id, sender_name, type, content, destroy_seconds, created_at')
-    .eq('room_id', `premium_${roomId}`)
+    .eq('room_id', key)
     .order('created_at', { ascending: true })
     .limit(300)
 
@@ -111,13 +122,23 @@ export async function fetchPremiumRoomMessagesFromDb(
     console.warn('[premium messages] 拉取历史失败（常为 messages 表 RLS 未放行 SELECT）:', error.message)
     return []
   }
-  if (!data?.length) return []
+  if (!data?.length) {
+    console.info(
+      '[premium messages] 该房间无历史行 room_id=',
+      key,
+      '若先发用户已发消息仍为空，多为 INSERT 被 RLS 拦截（先发端本地仍会显示）；请执行仓库 supabase/sql/messages_room_history_rls.sql（含 INSERT/DELETE）。'
+    )
+    return []
+  }
 
   const nowMs = Date.now()
   const out: PremiumDbMessageShape[] = []
   for (const row of data as Row[]) {
     const m = rowToMessage(row, myUserId, nowMs)
     if (m) out.push(m)
+  }
+  if (data.length > 0 && out.length === 0) {
+    console.info('[premium messages] 历史行均在服务端已判定过期被过滤', { room_id: key, rows: data.length })
   }
   return out
 }
@@ -129,10 +150,14 @@ export async function persistPremiumTextMessage(params: {
   textBody: string
   destroySeconds: number
 }): Promise<{ id: string; createdAt: string } | { error: string }> {
+  const roomKey = premiumMessagesRoomKey(params.roomId)
+  if (!roomKey) return { error: 'invalid roomId' }
+
   const { data, error } = await supabase
     .from('messages')
     .insert({
-      room_id: `premium_${params.roomId}`,
+      id: newMessageRowId(),
+      room_id: roomKey,
       sender_id: params.myId,
       sender_name: params.myName,
       type: 'text',
@@ -165,10 +190,14 @@ export async function persistPremiumFileMessage(params: {
     allow_download: params.allowDownload,
   })
 
+  const roomKey = premiumMessagesRoomKey(params.roomId)
+  if (!roomKey) return { error: 'invalid roomId' }
+
   let ins = await supabase
     .from('messages')
     .insert({
-      room_id: `premium_${params.roomId}`,
+      id: newMessageRowId(),
+      room_id: roomKey,
       sender_id: params.myId,
       sender_name: params.myName,
       type: 'file',
@@ -182,7 +211,8 @@ export async function persistPremiumFileMessage(params: {
     ins = await supabase
       .from('messages')
       .insert({
-        room_id: `premium_${params.roomId}`,
+        id: newMessageRowId(),
+        room_id: roomKey,
         sender_id: params.myId,
         sender_name: params.myName,
         type: 'text',
@@ -211,7 +241,8 @@ export async function deletePremiumMessageRow(id: string): Promise<void> {
 
 /** 房间结束/解散：删除该高级房在 messages 表中的全部记录 */
 export async function deleteAllPremiumMessagesForRoom(roomId: string): Promise<void> {
-  if (!roomId || roomId === '------') return
-  const { error } = await supabase.from('messages').delete().eq('room_id', `premium_${roomId}`)
+  const key = premiumMessagesRoomKey(roomId)
+  if (!key) return
+  const { error } = await supabase.from('messages').delete().eq('room_id', key)
   if (error) console.warn('清空房间消息失败:', error.message)
 }

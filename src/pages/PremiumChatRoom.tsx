@@ -103,7 +103,7 @@ function ImageModal({ src, onClose }: { src: string; onClose: () => void }) {
 
 export default function PremiumChatRoom() {
   const [searchParams] = useSearchParams();
-  const roomId = searchParams.get('roomId') || '------';
+  const roomId = (searchParams.get('roomId') || '------').trim();
   const destroyParam = parseInt(searchParams.get('destroy') || '3600');
   const durationLabel = searchParams.get('duration') ? decodeURIComponent(searchParams.get('duration')!) : durationLabelFromSeconds(destroyParam);
 
@@ -488,7 +488,10 @@ export default function PremiumChatRoom() {
 
     let newMsg: Message;
     if ('error' in persisted) {
-      console.warn('文件消息持久化失败:', persisted.error);
+      console.warn(
+        '文件消息持久化失败（后来者将看不到历史；多为 messages 表 INSERT 被 RLS 拦截）:',
+        persisted.error
+      );
       newMsg = {
         id: `${now}_${myId}`,
         type: 'file',
@@ -550,7 +553,10 @@ export default function PremiumChatRoom() {
 
     let newMsg: Message;
     if ('error' in persisted) {
-      console.warn('文字消息持久化失败:', persisted.error);
+      console.warn(
+        '文字消息持久化失败（后来者将看不到历史；多为 messages 表 INSERT 被 RLS 拦截）:',
+        persisted.error
+      );
       newMsg = {
         id: `${now}_${myId}`,
         type: 'text',

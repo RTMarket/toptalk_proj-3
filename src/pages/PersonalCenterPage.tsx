@@ -414,8 +414,8 @@ export default function PersonalCenterPage() {
                       )}
                       <div className="text-gray-600 text-[11px] mt-2 leading-snug">
                         {isSingleConsumedForCurrentPurchase()
-                          ? '本次单次权益已用于创建高级房'
-                          : '单次：可创建 1 个高级聊天室，创建后即消耗'}
+                          ? '本次单次权益已用于创建高级房（创建成功即消耗，不可再建）'
+                          : '单次：有效期内仅可创建 1 个高级房；房间在计时内占用同时活跃名额，需「解散」或到期后才释放'}
                       </div>
                     </div>
                   ) : planExpiresAt && remaining > 0 ? (

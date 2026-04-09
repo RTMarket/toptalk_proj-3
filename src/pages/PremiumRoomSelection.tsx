@@ -5,7 +5,15 @@ import { supabase } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
 import { syncSubscriptionFromApprovedOrder } from '../lib/subscription';
 import { postRoomEvent } from '../lib/accountApi';
-import { activeRoomRemainingMs, cleanupExpired, getActivePremiumRooms, PremiumActiveRoom, removeActivePremiumRoom, upsertActivePremiumRoom } from '../lib/premiumActiveRooms';
+import {
+  activeRoomRemainingMs,
+  cleanupExpired,
+  getActivePremiumRooms,
+  PremiumActiveRoom,
+  reconcileActivePremiumRoomsWithDb,
+  removeActivePremiumRoom,
+  upsertActivePremiumRoom,
+} from '../lib/premiumActiveRooms';
 import { getSinglePurchaseStamp, isSingleConsumedForCurrentPurchase } from '../lib/singlePlanConsumption';
 
 interface PremiumRoom {
@@ -262,10 +270,18 @@ export default function PremiumRoomSelection() {
     } catch { setMyRooms([]); }
   };
 
-  // 初始化：加载活跃高级房间
+  // 初始化：加载活跃高级房间，并与 Supabase 对齐（避免已解散/已到期仍占「同时活跃」名额）
   useEffect(() => {
     loadRooms();
-    setActiveRooms(getActivePremiumRooms());
+    let cancelled = false;
+    void (async () => {
+      const synced = await reconcileActivePremiumRoomsWithDb();
+      if (cancelled) return;
+      setActiveRooms(synced);
+    })();
+    return () => {
+      cancelled = true;
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -309,7 +325,7 @@ export default function PremiumRoomSelection() {
     if (!createPassword || !/^\d{4}$/.test(createPassword)) { setCreateError('请输入4位数字房间密码'); return; }
     if (!subscribed) { setCreateError('请先订阅套餐'); return; }
     if (currentPlanId === 'single' && isSingleConsumedForCurrentPurchase()) {
-      setCreateError('单次高级（9.9）已使用：该套餐仅允许创建 1 次高级聊天室。如需再次创建请升级/更换套餐。');
+      setCreateError('单次高级权益已使用：仅允许创建 1 个高级房（创建成功即消耗）。如需再创建请升级/更换套餐。');
       return;
     }
     if (activeRooms.length >= maxActive) { setCreateError(`当前套餐最多同时活跃 ${maxActive} 个高级房间（创建/加入都算）`); return; }
@@ -547,14 +563,31 @@ export default function PremiumRoomSelection() {
                 <div className="flex items-center gap-2 text-xs text-gray-400"><span className="text-green-400">✓</span> 密码保护房间</div>
               </div>
 
-              {/* 达到上限提示 */}
+              {/* 方案 2：单次套餐规则（固定展示，与「是否已达上限」无关） */}
+              {subscribed && currentPlanId === 'single' && (
+                <div className="bg-sky-500/10 border border-sky-400/25 rounded-xl px-4 py-3 mb-3 text-sky-100/95 text-[11px] leading-relaxed">
+                  <span className="font-semibold text-sky-200">单次高级规则：</span>
+                  有效期内仅可创建 <span className="text-white font-medium">1</span> 个高级房（创建成功即消耗本次权益）。
+                  房间在计时内会占用「同时活跃 1 间」；创建者点「离开」<span className="text-white font-medium">不会</span>解散房间，需回房点「解散房间」或等房间到期后才会释放名额。
+                </div>
+              )}
+
+              {/* 不可创建原因：单次已消耗 vs 活跃名额已满 */}
               {!canCreate && subscribed && (
-                <div className="bg-orange-400/10 border border-orange-400/20 rounded-xl px-4 py-3 mb-3 flex items-center gap-2">
-                  <svg className="w-4 h-4 text-orange-400 animate-pulse flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="bg-orange-400/10 border border-orange-400/20 rounded-xl px-4 py-3 mb-3 flex items-start gap-2">
+                  <svg className="w-4 h-4 text-orange-400 animate-pulse flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
-                  <span className="text-orange-400 text-xs font-medium">
-                    当前套餐最多同时活跃 {maxActive} 个高级房间（创建/加入都算），请先结束或解散其中一个
+                  <span className="text-orange-400 text-xs font-medium leading-relaxed">
+                    {singleConsumed ? (
+                      <>
+                        单次高级权益已使用：仅允许创建 1 个高级房（创建成功即消耗）。如需再创建新的高级房，请升级/更换套餐。
+                      </>
+                    ) : (
+                      <>
+                        当前套餐最多同时活跃 {maxActive} 个高级房间（创建/加入都算）。若房间仍在计时内会占用名额；创建者点「离开」不等于解散，需回房「解散房间」或等到期释放。也可刷新本页以同步已解散/已结束的房间。
+                      </>
+                    )}
                   </span>
                 </div>
               )}

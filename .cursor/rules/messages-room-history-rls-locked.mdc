@@ -1,6 +1,6 @@
 ---
 description: 聊天室 messages 历史拉取与 Supabase RLS（后进用户可读未过期历史）已锁定，改动前须征得用户同意
-globs: supabase/sql/messages_room_history_rls.sql,supabase/migrations/20260410160000_messages_select_policy_room_history.sql,src/lib/premiumRoomDbMessages.ts,src/pages/PremiumChatRoom.tsx
+globs: supabase/sql/messages_room_history_rls.sql,supabase/migrations/20260410160000_messages_select_policy_room_history.sql,supabase/migrations/20260410170000_messages_insert_delete_policies.sql,src/lib/premiumRoomDbMessages.ts,src/pages/PremiumChatRoom.tsx
 alwaysApply: true
 ---
 
@@ -16,6 +16,8 @@ alwaysApply: true
 
 2. **Supabase RLS**
    - 必须允许使用 **anon key** 的客户端对**聊天室消息**执行 **SELECT**，否则历史拉取为空（PostgREST 常返回 `[]` 且不一定带 error）。
+   - 同时必须允许 **INSERT**：否则先发用户消息**写不进 DB**（本地仍会显示），后来者永远拉不到历史。
+   - **DELETE** 用于阅后即焚到期删行 / 解散清库，需与 `deletePremiumMessageRow` / `deleteAllPremiumMessagesForRoom` 行为一致。
    - 策略语义应与仓库内 SQL 一致：按 `room_id` 限定在 `free_%` / `premium_%`（或经用户评估后的等价策略）。
 
 3. **应用层**
@@ -25,6 +27,7 @@ alwaysApply: true
 
 - `supabase/sql/messages_room_history_rls.sql`
 - `supabase/migrations/20260410160000_messages_select_policy_room_history.sql`
+- `supabase/migrations/20260410170000_messages_insert_delete_policies.sql`
 - `src/lib/premiumRoomDbMessages.ts` 中与 **`messages` 表查询/历史拉取/错误处理**相关的逻辑
 - `src/pages/PremiumChatRoom.tsx` 中与 **进房拉取历史消息**（`fetchPremiumRoomMessagesFromDb`）相关的 effect/条件（如 `supabaseConfigOk` 守卫）
 
