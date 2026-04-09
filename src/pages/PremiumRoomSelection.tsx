@@ -32,7 +32,9 @@ function isPremiumRoomCreator(roomId: string): boolean {
 function isSubscribed(sub: Subscription | null): boolean {
   if (!sub) return false;
   if (sub.planId === 'free') return false;
-  if (new Date(sub.expireAt).getTime() < Date.now()) return false;
+  const t = new Date(sub.expireAt).getTime();
+  if (!Number.isFinite(t)) return false;
+  if (t < Date.now()) return false;
   return true;
 }
 
@@ -296,21 +298,8 @@ export default function PremiumRoomSelection() {
     return Math.max(0, expire - Date.now());
   };
 
-  const handleSelectPlan = (planId: string) => {
-    const plan = pricingPlans.find(p => p.id === planId);
-    if (!plan) return;
-    const expireAt = new Date();
-    if (plan.type === 'single') expireAt.setFullYear(expireAt.getFullYear() + 10);
-    else if (plan.type === 'daily') expireAt.setDate(expireAt.getDate() + 1);
-    else if (plan.type === 'weekly') expireAt.setDate(expireAt.getDate() + 7);
-    else if (plan.type === 'monthly') expireAt.setMonth(expireAt.getMonth() + 1);
-    else if (plan.type === 'enterprise' || plan.type === 'enterprise_pro') expireAt.setMonth(expireAt.getMonth() + 1);
-    else expireAt.setDate(expireAt.getDate() + 1);
-    const sub: Subscription = { planId, expireAt: expireAt.toISOString() };
-    localStorage.setItem('toptalk_subscription', JSON.stringify(sub));
-    setSubscription(sub);
-    setShowPricing(false);
-  };
+  // 注意：套餐状态只能由后端（邀请码兑换/历史订单同步）写入。
+  // 不允许前端通过选择套餐“本地开通”，避免免费用户绕过权限创建高级聊天室。
 
   const durationOptions = [
     { label: '15分钟', value: 900 }, { label: '30分钟', value: 1800 },
