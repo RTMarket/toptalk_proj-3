@@ -1,5 +1,6 @@
 import { normalizeClientAnonKey } from './anonKey'
 import { computePlanExpiresAtIso } from './planExpiry'
+import { clearSinglePlanConsumption } from './singlePlanConsumption'
 import { replaceLatestSubscriptionPurchasedAt } from './subscriptionAnchor'
 
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
@@ -9,6 +10,36 @@ function toMs(iso?: string | null): number | null {
   if (!iso) return null
   const t = new Date(String(iso)).getTime()
   return Number.isFinite(t) ? t : null
+}
+
+export type LivePremiumSubscription = { planId: string; expireAt: string }
+
+/**
+ * 高级房列表页等：以 localStorage `toptalk_plan` 为套餐身份权威，避免 `toptalk_subscription` 与 React state 滞后导致仍显示「单次已消耗」等误判。
+ */
+export function readLivePremiumSubscription(): LivePremiumSubscription | null {
+  try {
+    const plan = (localStorage.getItem('toptalk_plan') || '').trim() || 'free'
+    if (plan === 'free') return null
+    let exp = (localStorage.getItem('toptalk_plan_expires') || '').trim()
+    if (!exp) {
+      try {
+        const raw = localStorage.getItem('toptalk_subscription')
+        if (raw) {
+          const s = JSON.parse(raw) as { expireAt?: string }
+          exp = String(s?.expireAt || '').trim()
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!exp) return null
+    const t = new Date(exp).getTime()
+    if (!Number.isFinite(t) || t <= Date.now()) return null
+    return { planId: plan, expireAt: exp }
+  } catch {
+    return null
+  }
 }
 
 export async function syncSubscriptionFromApprovedOrder(email: string): Promise<void> {
@@ -55,7 +86,9 @@ export async function syncSubscriptionFromApprovedOrder(email: string): Promise<
     localStorage.setItem('toptalk_plan', planId)
     localStorage.setItem('toptalk_plan_purchased', purchasedAtIso)
     localStorage.setItem('toptalk_plan_expires', expiresAt)
+    localStorage.setItem('toptalk_subscription', JSON.stringify({ planId, expireAt: expiresAt }))
     replaceLatestSubscriptionPurchasedAt(purchasedAtIso)
+    clearSinglePlanConsumption()
 
     const stored = localStorage.getItem('toptalk_user')
     const user = stored ? JSON.parse(stored) : {}

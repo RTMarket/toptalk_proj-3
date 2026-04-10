@@ -3,7 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { pricingPlans } from '../data/pricingData';
 import { supabase } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
-import { syncSubscriptionFromApprovedOrder } from '../lib/subscription';
+import {
+  planIdToPremiumEntryTier,
+  premiumEntryPath,
+  resolvePremiumEntryPathForPlanId,
+  type PremiumEntryTier,
+} from '../lib/premiumEntryRoutes';
+import { readLivePremiumSubscription, syncSubscriptionFromApprovedOrder } from '../lib/subscription';
 import { postRoomEvent } from '../lib/accountApi';
 import {
   activeRoomRemainingMs,
@@ -203,7 +209,7 @@ function PricingModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-export default function PremiumRoomSelection() {
+export default function PremiumRoomSelection({ tier }: { tier: PremiumEntryTier }) {
   const navigate = useNavigate();
   const [subscription, setSubscription] = useState<Subscription | null>(null);
   const [loggedIn, setLoggedIn] = useState(() => {
@@ -228,20 +234,8 @@ export default function PremiumRoomSelection() {
     function loadSub() {
       try {
         setLoggedIn(!!localStorage.getItem('toptalk_user'));
-        var raw = localStorage.getItem('toptalk_subscription');
-        if (raw) {
-          setSubscription(JSON.parse(raw));
-        } else {
-          // 兼容：如果没有 toptalk_subscription，尝试读取 toptalk_plan
-          var plan = localStorage.getItem('toptalk_plan');
-          if (plan && plan !== 'free') {
-            var expires = (localStorage.getItem('toptalk_plan_expires') || '').trim();
-            // expireAt 为空时视为未开通（通常是还没同步到本地订阅）
-            setSubscription(expires ? { planId: plan, expireAt: expires } : null);
-          } else {
-            setSubscription(null);
-          }
-        }
+        // 以 toptalk_plan + toptalk_plan_expires 为权威，避免仅依赖 toptalk_subscription / React 状态滞后导致误判「单次已消耗」
+        setSubscription(readLivePremiumSubscription());
       } catch {
         setSubscription(null);
         try { setLoggedIn(!!localStorage.getItem('toptalk_user')); } catch { setLoggedIn(false); }
@@ -266,6 +260,18 @@ export default function PremiumRoomSelection() {
       window.removeEventListener('toptalk_login', loadSub as any);
     };
   }, []);
+
+  // 分档路由：未订阅统一进 free；已订阅进与套餐 id 对应档，避免单次/个人/企业规则混在同一 URL
+  useEffect(() => {
+    const subscribedNow = isSubscribed(subscription);
+    const planId = subscription?.planId || 'free';
+    const actual = subscribedNow ? planIdToPremiumEntryTier(planId) : 'free';
+    if (!subscribedNow) {
+      if (tier !== 'free') navigate(premiumEntryPath('free'), { replace: true });
+      return;
+    }
+    if (actual !== tier) navigate(resolvePremiumEntryPathForPlanId(planId), { replace: true });
+  }, [tier, navigate, subscription]);
 
   const subscribed = isSubscribed(subscription);
 
@@ -316,7 +322,7 @@ export default function PremiumRoomSelection() {
     { label: '2小时30分', value: 9000 },
   ];
 
-  const currentPlanId = subscription?.planId || localStorage.getItem('toptalk_plan') || 'free';
+  const currentPlanId = subscription?.planId || 'free';
   const currentPlan = pricingPlans.find(p => p.id === currentPlanId) || pricingPlans.find(p => p.id === 'free')!;
   /** 高级房「同时活跃」槽位：付费=套餐 roomCount；未付费=1（仅可加入一间，不可创建） */
   const premiumSlotLimit = subscribed ? (Number(currentPlan.roomCount) || 1) : 1;
@@ -475,6 +481,12 @@ export default function PremiumRoomSelection() {
             <span className="text-3xl">🔐</span>
             <h1 className="text-3xl sm:text-4xl font-extrabold text-white">高级聊天室</h1>
           </div>
+          <p className="text-gray-500 text-xs mb-2">
+            {tier === 'free' && '入口：免费版（可加入他人高级房；创建需先开通付费套餐）'}
+            {tier === 'single' && '入口：单次高级套餐'}
+            {tier === 'personal' && '入口：日卡 / 周卡 / 月卡'}
+            {tier === 'enterprise' && '入口：企业版 / 企业旗舰'}
+          </p>
           <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-3">
             <span className="bg-yellow-400/20 text-yellow-400 text-xs px-3 py-1 rounded-full border border-yellow-400/30 font-medium">创建需订阅</span>
             <span className="bg-emerald-500/15 text-emerald-300 text-xs px-3 py-1 rounded-full border border-emerald-500/25 font-medium">加入需登录 · 单次一间</span>

@@ -1,0 +1,38 @@
+---
+description: 高级房列表按套餐分档路由（免费/单次/个人/企业）— 与产品四条线对齐，改动须评估分档语义
+globs: src/lib/premiumEntryRoutes.ts,src/pages/PremiumRoomEntryRedirect.tsx,src/pages/PremiumRoomSelection.tsx,src/App.tsx,src/pages/PremiumChatRoom.tsx
+alwaysApply: true
+---
+
+# 高级房列表「分档路由」— 已确认
+
+## 路由约定（对外入口仍可只用 `/rooms-premium`）
+
+- **`/rooms-premium`**：仅作 **智能跳转**（`PremiumRoomEntryRedirect`），按 `readLivePremiumSubscription()` 落到下列之一；**未订阅** → **`/rooms-premium/free`**。
+- **`/rooms-premium/free`**：免费档（可加入高级房；创建需先开通付费）。
+- **`/rooms-premium/single`**：`single` 单次高级。
+- **`/rooms-premium/personal`**：`daily` / `weekly` / `monthly`。
+- **`/rooms-premium/enterprise`**：`enterprise` / `enterprise_pro`。
+
+`PremiumRoomSelection` 必须传入 **`tier`**，并在 **`subscription` 与 `tier` 不一致** 时 **`replace` 到正确分档**（已订阅按套餐 id；未订阅统一 `free`）。
+
+离开 **`PremiumChatRoom`** 回列表须使用 **`getPremiumListPathForCurrentUser()`**，避免回到错误分档再靠分支兜底。
+
+## 分档映射实现位置
+
+- `src/lib/premiumEntryRoutes.ts`：`PremiumEntryTier`、`planIdToPremiumEntryTier`、`premiumEntryPath`、`resolvePremiumEntryPathForPlanId`、`getPremiumListPathForCurrentUser`。
+
+## 必须遵守
+
+1. **禁止**在未说明后果的情况下去掉分档路由、改路径前缀、或让多档共用同一 URL 却依赖隐式分支「凑合」。
+2. 修改 **`planId` 与分档对应关系**（例如新增套餐 id）时，须同步 **`planIdToPremiumEntryTier`** 与定价数据。
+3. **即时聊天室**（`/rooms`、`FreeRoomSelection`）仍为免费即时线，**勿**与上述高级房分档混为同一路由语义。
+
+## 与已锁定规则的关系
+
+- **单次创建权 / 会话结束 / 消耗记录**：仍以 `premium-single-plan-room-locked.mdc` 为准；**单次产品逻辑**挂在 **`/rooms-premium/single`** 入口上执行。
+- **房间倒计时 / 刷新离开**：`PremiumChatRoom` 仅增加「回列表 URL 按当前套餐分档」；**不得**借机改倒计时公式或刷新语义（见 `room-countdown-locked.mdc`）。
+
+## 例外
+
+- 仅修复**明确 bug**（错误跳转、死循环重定向等）时，可最小范围修改，并在回复中说明未改变分档语义。

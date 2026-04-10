@@ -6,6 +6,7 @@ import PersonalCenterPage from './pages/PersonalCenterPage'
 import FreeRoomSelection from './pages/FreeRoomSelection'
 import PaymentPage from './pages/PaymentPage'
 import LegalPage from './pages/LegalPage'
+import PremiumRoomEntryRedirect from './pages/PremiumRoomEntryRedirect'
 import PremiumRoomSelection from './pages/PremiumRoomSelection'
 import PremiumChatRoom from './pages/PremiumChatRoom'
 import FreeChatRoom from './pages/FreeChatRoom'
@@ -66,8 +67,12 @@ export default function App() {
         } />
         <Route path="/free-chat" element={<FreeChatRoom />} />
 
-        {/* 高级聊天室：选择页 → 聊天室内页 */}
-        <Route path="/rooms-premium" element={<PremiumRoomSelection />} />
+        {/* 高级聊天室：按套餐分档入口（/rooms-premium 智能跳转）→ 聊天室内页 */}
+        <Route path="/rooms-premium" element={<PremiumRoomEntryRedirect />} />
+        <Route path="/rooms-premium/free" element={<PremiumRoomSelection tier="free" />} />
+        <Route path="/rooms-premium/single" element={<PremiumRoomSelection tier="single" />} />
+        <Route path="/rooms-premium/personal" element={<PremiumRoomSelection tier="personal" />} />
+        <Route path="/rooms-premium/enterprise" element={<PremiumRoomSelection tier="enterprise" />} />
         <Route path="/premium-chat" element={<PremiumChatRoom />} />
 
         {/* 支付页面 */}

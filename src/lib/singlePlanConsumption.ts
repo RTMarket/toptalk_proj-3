@@ -27,6 +27,9 @@ export function clearSinglePlanConsumption(): void {
 
 export function isSingleConsumedForCurrentPurchase(): boolean {
   try {
+    const plan = (localStorage.getItem('toptalk_plan') || '').trim();
+    if (plan !== 'single') return false;
+
     const stamp = getSinglePurchaseStamp()
     const consumedAt = (localStorage.getItem('toptalk_single_consumed_at') || '').trim();
     const consumedPurchase = (localStorage.getItem('toptalk_single_consumed_purchase') || '').trim();

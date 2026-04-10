@@ -13,6 +13,7 @@ import {
   persistPremiumFileMessage,
   persistPremiumTextMessage,
 } from '../lib/premiumRoomDbMessages';
+import { getPremiumListPathForCurrentUser } from '../lib/premiumEntryRoutes';
 import { expireSinglePlanAfterPremiumRoomSessionEnd } from '../lib/singlePlanConsumption';
 
 interface Message {
@@ -167,7 +168,7 @@ export default function PremiumChatRoom() {
   useLayoutEffect(() => {
     if (!roomId || roomId === '------' || !reloadLeave) return;
     applyPremiumLeaveOnReload(roomId, amICreator);
-    window.location.replace('/rooms-premium');
+    window.location.replace(getPremiumListPathForCurrentUser());
   }, [roomId, reloadLeave, amICreator]);
 
   // 始终以 Supabase rooms.created_at + destroy_seconds 为唯一倒计时来源；再同步本地活跃列表
@@ -184,7 +185,7 @@ export default function PremiumChatRoom() {
       if (cancelled) return;
       if (data?.created_at) {
         if (String((data as { status?: string }).status || '') === 'dissolved') {
-          window.location.replace('/rooms-premium');
+          window.location.replace(getPremiumListPathForCurrentUser());
           return;
         }
         const createdAt = String((data as { created_at: string }).created_at);
@@ -300,7 +301,7 @@ export default function PremiumChatRoom() {
 
     channel.on('broadcast', { event: 'room_dissolved' }, () => {
       setOverlayType('dissolving');
-      setTimeout(() => window.location.replace('/rooms-premium'), 2100);
+      setTimeout(() => window.location.replace(getPremiumListPathForCurrentUser()), 2100);
     });
 
     channel.on('presence', { event: 'sync' }, updatePresence);
@@ -409,7 +410,7 @@ export default function PremiumChatRoom() {
     void deleteAllPremiumMessagesForRoom(roomId);
     if (amICreator) expireSinglePlanAfterPremiumRoomSessionEnd();
     // 2秒后跳转高级聊天室列表页
-    setTimeout(() => window.location.replace('/rooms-premium'), 2100);
+    setTimeout(() => window.location.replace(getPremiumListPathForCurrentUser()), 2100);
   };
   const doLeaveRoom = () => {
     setShowLeaveConfirm(false);
@@ -428,7 +429,7 @@ export default function PremiumChatRoom() {
       try { _ch?.send({ type: 'broadcast', event: 'user_left', payload: { userId: _uid } }); } catch { /* ignore */ }
       try { _ch?.unsubscribe(); } catch { /* ignore */ }
     }, 0);
-    setTimeout(() => { window.location.replace('/rooms-premium'); }, 2100);
+    setTimeout(() => { window.location.replace(getPremiumListPathForCurrentUser()); }, 2100);
   };
 
   // 离开网页/关闭标签页：也算离开房间（加入者需释放活跃占用）
@@ -812,7 +813,7 @@ export default function PremiumChatRoom() {
             <div className="text-5xl mb-5">⏱️</div>
             <h2 className="text-orange-400 font-bold text-xl mb-3">房间已结束</h2>
             <p className="text-gray-500 text-sm mb-6">房间时间已到，所有消息已焚毁。</p>
-            <button onClick={() => window.location.replace('/rooms-premium')}
+            <button onClick={() => window.location.replace(getPremiumListPathForCurrentUser())}
               className="w-full bg-orange-400 hover:bg-orange-300 text-[#1a365d] font-bold py-3 rounded-xl text-sm transition-colors">
               返回聊天室列表
             </button>

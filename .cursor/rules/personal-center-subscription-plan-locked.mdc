@@ -26,7 +26,7 @@ alwaysApply: true
 ## 锁定范围（须用户同意后再动）
 
 - `src/lib/planExpiry.ts`：**套餐到期时间计算**（单次时长、日/周/月「N×24h − 1 分钟」等）。此为**唯一口径来源**，其它处应与之一致。
-- `src/lib/subscription.ts`：历史订单同步到本地 `toptalk_plan_*` 时，**不得改到期计算公式**导致与 `planExpiry` 不一致；写入套餐时须与 **`subscriptionAnchor`** 一致（新订单开通须更新锚点）。
+- `src/lib/subscription.ts`：历史订单同步到本地 `toptalk_plan_*` 时，**不得改到期计算公式**导致与 `planExpiry` 不一致；写入套餐时须与 **`subscriptionAnchor`** 一致（新订单开通须更新锚点）；成功写入新订单时须 **`clearSinglePlanConsumption()`** 并同步 **`toptalk_subscription`**，避免单次「已创建」标记跨套餐残留；**`readLivePremiumSubscription`** 为高级房列表页订阅快照权威逻辑的一部分，勿与仅读 `toptalk_subscription` 的旧口径混用。
 - `src/lib/subscriptionAnchor.ts`：**锚点键名**、`replace` / `bump` / `clear` 语义，以及 **`isServerPlanOlderThanLatestSubscription` / `shouldRejectServerPlanWithoutPurchasedAtWhenLocalFree`** 的用途（防旧套餐写回）。
 - `src/pages/PersonalCenterPage.tsx`：与套餐相关的 **`useCountdown` / `formatCountdown`（含每秒刷新与是否显示秒）**、**本地 `toptalk_plan_*` 校准**、**`accountMe` 合并逻辑**（含「服务端误报 free 时勿覆盖本地有效订阅」、**锚点防旧套餐**、单次结束守卫）、**邀请码兑换**与锚点更新、**订阅 Tab 内套餐剩余时间展示**。
 - `supabase/functions/account/index.ts`：与 **邀请码兑换（redeem-invite）写入 `plan_purchased_at` / `plan_expires_at`**、以及 **`/me` 返回用户 `plan` 字段**相关的逻辑。**禁止**在未说明后果的情况下改套餐写入规则；该文件若还有登录/注册等其它逻辑，非套餐相关改动仍应谨慎，但**套餐时间规则**必须遵守本节。

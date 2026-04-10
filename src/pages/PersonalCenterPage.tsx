@@ -494,7 +494,7 @@ export default function PersonalCenterPage() {
                         (redeemResult.purchasedAt || '').trim() || new Date().toISOString();
                       replaceLatestSubscriptionPurchasedAt(purchasedAtResolved);
                       localStorage.setItem('toptalk_plan_purchased', purchasedAtResolved);
-                      if (redeemResult.planId === 'single') clearSinglePlanConsumption();
+                      clearSinglePlanConsumption();
                       localStorage.setItem('toptalk_plan_expires', redeemResult.expiresAt);
                       localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: redeemResult.planId, expireAt: redeemResult.expiresAt }));
                       // 立即更新本页状态（避免依赖 storage 事件导致显示不刷新）
