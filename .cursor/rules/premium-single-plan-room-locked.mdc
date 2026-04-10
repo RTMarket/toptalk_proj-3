@@ -1,0 +1,45 @@
+---
+description: 单次套餐（single）高级房创建/加入与产品说明已锁定，未经用户明确同意禁止改动
+globs: src/lib/singlePlanConsumption.ts,src/pages/PremiumRoomSelection.tsx,src/data/pricingData.ts,src/pages/PersonalCenterPage.tsx
+alwaysApply: true
+---
+
+# 单次套餐（`single`）— 高级房创建 / 加入 / 说明 — 已锁定
+
+用户已确认：单次高级套餐下**创建高级房、加入高级房**及**对外说明**的规则已按产品跑通。**未经用户明确允许，禁止擅自修改、重构或「顺手优化」**。
+
+## 产品规则（必须与实现一致，禁止私自改口径）
+
+1. **创建权（消耗）**
+   - 单次套餐在有效期内，**仅允许成功「创建」1 个高级房**；创建流程在客户端视为成功（完成本地记录、活跃列表、`navigate` 进房前）即调用 **`markSingleConsumedNow()`**，**创建成功即消耗本次权益**，不可再建第二个（需升级/换套餐）。
+   - **加入他人高级房不消耗**单次「创建权」；`markSingleConsumedNow` **仅**在创建分支、且 `currentPlanId === 'single'` 时执行。
+
+2. **同时活跃名额**
+   - 与 `pricingData` 中 **`id: 'single'` 的 `roomCount`**（当前为 **1**）一致：**创建与加入均占用**「同时活跃」名额，直至房间**解散**或**墙钟到期**（与 `toptalk_premium_active_rooms`、`reconcileActivePremiumRoomsWithDb` 等整体逻辑一致；**勿**把单次改成与其它套餐不同的「同时活跃」口径，除非用户明确要求并评估影响）。
+
+3. **离开 vs 解散**
+   - **创建者点「离开」不等于解散房间**；在房间未解散且未到期前仍可占用「同时活跃」名额。对外说明见 **`pricingData` 单次 `features`** 与 **`PremiumRoomSelection` 单次规则提示**，须与已锁定的房间倒计时/离开规则一致。
+
+4. **邀请码兑换新的单次权益**
+   - 兑换成功且 **`planId === 'single'`** 时须 **`clearSinglePlanConsumption()`**，保证新开通对应**新的创建权**。
+   - **`toptalk_plan_purchased`**：须写入稳定开通戳；若接口 **`purchasedAt` 为空**，客户端使用 **当前时间 ISO** 作为兜底写入（并与 `toptalk_user.planPurchasedAt` 等同步一致），避免与历史 **`unknown`** 消耗记录误匹配。
+
+5. **判断是否已消耗（`isSingleConsumedForCurrentPurchase`）**
+   - 以 **`toptalk_plan_purchased`**（`getSinglePurchaseStamp()`）与 **`toptalk_single_consumed_purchase`** 对齐为核心；**`unknown`** 分支仅用于兼容历史脏数据，**禁止**为「整洁」改掉而导致新用户无法创建或老用户重复创建。
+
+## 锁定范围（须用户同意后再动）
+
+- `src/lib/singlePlanConsumption.ts`：`getSinglePurchaseStamp`、`clearSinglePlanConsumption`、`isSingleConsumedForCurrentPurchase` 的语义与 localStorage 键名。
+- `src/pages/PremiumRoomSelection.tsx`：`markSingleConsumedNow`、`singleConsumed` / `canCreate`、创建按钮与 **`handleCreateRoom` 内与 `single` 相关的校验与 `markSingleConsumedNow` 调用**；单次套餐固定规则提示与「已消耗 / 名额满」相关文案（与产品一致前提下可改错别字，**不可改规则含义**）。
+- `src/data/pricingData.ts`：**仅** `id: 'single'` 这一条套餐（含 `roomCount`、`features`、名称等面向用户的单次说明）。
+- `src/pages/PersonalCenterPage.tsx`：**邀请码兑换成功**分支中，与 **`planId === 'single'`**、`toptalk_plan_purchased` 兜底、`clearSinglePlanConsumption`、以及单次套餐说明小字（`isSingleConsumedForCurrentPurchase` 相关展示）**直接相关**的代码。
+
+## 必须遵守
+
+1. **任何**对上述规则或实现行为的改动，须先向用户说明：**为什么要改、改什么、风险是什么（含已开通单次用户能否再建、是否会误判已消耗）**，并得到**明确同意**后再动。
+2. **禁止**为「代码好看」合并/拆分状态、改掉消耗时机、或去掉兑换后的 **`clearSinglePlanConsumption`**。
+3. **禁止**在未评估的情况下，让单次创建权与 **`toptalk_plan_purchased` / 消耗记录** 的对应关系出现分叉。
+
+## 例外（仍需谨慎）
+
+- 仅修复**明确 bug**（且可复现）时，可**最小范围**修改，并在回复中**逐条说明**改了哪几行、为何不影响已确认的上述规则。
