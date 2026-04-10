@@ -263,6 +263,11 @@ export default function PremiumChatRoom() {
   // ── Supabase Realtime 订阅 ──────────────────────────
   useEffect(() => {
     if (!supabaseConfigOk || !roomId || roomId === '------' || suppressChatDueToReload) return;
+    setRtStatus('connecting');
+    const failTimer = window.setTimeout(() => {
+      setRtStatus(s => (s === 'ready' ? s : 'failed'));
+    }, 6000);
+
     const uid = userIdRef.current;
     const channel = supabase.channel(`premium_room_${roomId}`, {
       config: {
@@ -320,8 +325,10 @@ export default function PremiumChatRoom() {
     channel.on('presence', { event: 'join' }, updatePresence);
     channel.on('presence', { event: 'leave' }, updatePresence);
 
-    channel.subscribe(async (status) => {
-      if (status !== 'SUBSCRIBED') return;
+    let didApplyJoin = false;
+    const afterJoin = async () => {
+      if (didApplyJoin) return;
+      didApplyJoin = true;
       setRtStatus('ready');
       try {
         await channel.track({ userId: uid, roomId, online_at: new Date().toISOString() });
@@ -329,25 +336,26 @@ export default function PremiumChatRoom() {
         /* ignore */
       }
       updatePresence();
+    };
+
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        void afterJoin();
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        setRtStatus('failed');
+      }
     });
 
+    if (channel.state === 'joined') {
+      void afterJoin();
+    }
+
     return () => {
-      const savedChannel = channelRef.current;
+      window.clearTimeout(failTimer);
       channelRef.current = null;
-      try {
-        savedChannel?.unsubscribe();
-      } catch { /* ignore */ }
+      void supabase.removeChannel(channel);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, suppressChatDueToReload]);
-
-  useEffect(() => {
-    if (!supabaseConfigOk || suppressChatDueToReload) return;
-    setRtStatus('connecting');
-    const t = window.setTimeout(() => {
-      setRtStatus(s => (s === 'ready' ? s : 'failed'));
-    }, 6000);
-    return () => window.clearTimeout(t);
   }, [roomId, suppressChatDueToReload]);
 
   // Room countdown（以“创建时间”为基准计算，保证所有加入者看到一致的剩余时间）

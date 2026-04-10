@@ -236,6 +236,11 @@ export default function FreeChatRoom() {
   // ── Supabase Realtime：广播消息 + Presence 在线人数（跨设备一致） ──
   useEffect(() => {
     if (!supabaseConfigOk || !roomId || roomId === '——' || suppressChatDueToReload) return;
+    setRtStatus('connecting');
+    const failTimer = window.setTimeout(() => {
+      setRtStatus(s => (s === 'ready' ? s : 'failed'));
+    }, 6000);
+
     const uid = userIdRef.current;
     const channel = supabase.channel(`free_room_${roomId}`, {
       config: {
@@ -290,8 +295,10 @@ export default function FreeChatRoom() {
       setTimeout(() => { window.location.href = '/rooms'; }, 2000);
     });
 
-    channel.subscribe(async (status) => {
-      if (status !== 'SUBSCRIBED') return;
+    let didApplyJoin = false;
+    const afterJoin = async () => {
+      if (didApplyJoin) return;
+      didApplyJoin = true;
       setRtStatus('ready');
       try {
         await channel.track({
@@ -303,24 +310,26 @@ export default function FreeChatRoom() {
         // presence 失败不应影响收发消息；在线人数/排序会退化
       }
       updatePresence();
+    };
+
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        void afterJoin();
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+        setRtStatus('failed');
+      }
     });
 
-    return () => {
-      channelRef.current = null;
-      try {
-        channel.unsubscribe();
-      } catch { /* ignore */ }
-    };
-  }, [roomId, suppressChatDueToReload]);
+    // RealtimeClient 按 topic 复用 channel；若实例已 joined，subscribe() 不会再触发 SUBSCRIBED 回调
+    if (channel.state === 'joined') {
+      void afterJoin();
+    }
 
-  // 如果长时间没订阅成功，提示用户（网络/Realtime 异常）
-  useEffect(() => {
-    if (!supabaseConfigOk || suppressChatDueToReload) return;
-    setRtStatus('connecting');
-    const t = window.setTimeout(() => {
-      setRtStatus(s => (s === 'ready' ? s : 'failed'));
-    }, 6000);
-    return () => window.clearTimeout(t);
+    return () => {
+      window.clearTimeout(failTimer);
+      channelRef.current = null;
+      void supabase.removeChannel(channel);
+    };
   }, [roomId, suppressChatDueToReload]);
 
   // ── 进入房间权限检查 ─────────────────────────────────
