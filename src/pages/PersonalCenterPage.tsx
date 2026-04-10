@@ -7,7 +7,12 @@ import { clampNickname, isValidNickname, NICKNAME_MAX_LEN } from '../lib/nicknam
 import { isValidInviteCode, normalizeInviteCode, redeemInviteCode } from '../lib/inviteCodeApi';
 import { accountMe } from '../lib/accountApi';
 import { computePlanExpiresAtIso, computePlanExpiresAtMs, SINGLE_PLAN_DURATION_MS } from '../lib/planExpiry';
-import { clearSinglePlanConsumption, isSingleConsumedForCurrentPurchase } from '../lib/singlePlanConsumption';
+import {
+  clearSinglePlanConsumption,
+  clearSingleSessionEndedGuard,
+  isSingleConsumedForCurrentPurchase,
+  SINGLE_SESSION_ENDED_KEY,
+} from '../lib/singlePlanConsumption';
 
 const planLabels: Record<string, string> = {
   free: '免费版', single: '单次高级', daily: '日卡', weekly: '周卡',
@@ -219,30 +224,47 @@ export default function PersonalCenterPage() {
               localStorage.removeItem('toptalk_plan_expires');
               localStorage.removeItem('toptalk_subscription');
             } catch { /* ignore */ }
+            clearSingleSessionEndedGuard();
           }
         } else {
-          if (!nextExpiresAt && nextPurchasedAt) {
-            const pm = toMs(nextPurchasedAt);
-            if (pm) {
-              const iso = computePlanExpiresAtIso(nextPlan, pm);
-              if (iso) nextExpiresAt = iso;
-            }
-          }
-          if (!nextExpiresAt) nextExpiresAt = (localStorage.getItem('toptalk_plan_expires') || '').trim();
-          if (!nextPurchasedAt) nextPurchasedAt = (localStorage.getItem('toptalk_plan_purchased') || '').trim();
-
+          let singleSessionEnded = false;
           try {
-            localStorage.setItem('toptalk_plan', nextPlan);
-            if (nextPurchasedAt) localStorage.setItem('toptalk_plan_purchased', nextPurchasedAt);
-            if (nextExpiresAt) {
-              localStorage.setItem('toptalk_plan_expires', nextExpiresAt);
-              localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: nextPlan, expireAt: nextExpiresAt }));
-            }
+            singleSessionEnded = localStorage.getItem(SINGLE_SESSION_ENDED_KEY) === '1';
           } catch { /* ignore */ }
+          if (nextPlan !== 'single') {
+            clearSingleSessionEndedGuard();
+          }
+
+          if (!(nextPlan === 'single' && singleSessionEnded)) {
+            if (!nextExpiresAt && nextPurchasedAt) {
+              const pm = toMs(nextPurchasedAt);
+              if (pm) {
+                const iso = computePlanExpiresAtIso(nextPlan, pm);
+                if (iso) nextExpiresAt = iso;
+              }
+            }
+            if (!nextExpiresAt) nextExpiresAt = (localStorage.getItem('toptalk_plan_expires') || '').trim();
+            if (!nextPurchasedAt) nextPurchasedAt = (localStorage.getItem('toptalk_plan_purchased') || '').trim();
+
+            try {
+              localStorage.setItem('toptalk_plan', nextPlan);
+              if (nextPurchasedAt) localStorage.setItem('toptalk_plan_purchased', nextPurchasedAt);
+              if (nextExpiresAt) {
+                localStorage.setItem('toptalk_plan_expires', nextExpiresAt);
+                localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: nextPlan, expireAt: nextExpiresAt }));
+              }
+            } catch { /* ignore */ }
+          }
         }
 
         // 服务端误报 free 但本地仍有效时，勿覆盖 toptalk_user.plan（否则刷新后变免费）
-        if (!(nextPlan === 'free' && localActiveGuard)) {
+        let skipUserPlanWrite = false;
+        try {
+          if (nextPlan === 'single' && localStorage.getItem(SINGLE_SESSION_ENDED_KEY) === '1') {
+            skipUserPlanWrite = true;
+          }
+        } catch { /* ignore */ }
+        if (!(nextPlan === 'free' && localActiveGuard) && !skipUserPlanWrite) {
           try {
             const raw = localStorage.getItem('toptalk_user');
             const u = raw ? JSON.parse(raw) : {};
@@ -454,6 +476,7 @@ export default function PersonalCenterPage() {
                     setInviteSuccess('');
                     try {
                       const redeemResult = await redeemInviteCode(inviteCode);
+                      clearSingleSessionEndedGuard();
                       localStorage.setItem('toptalk_plan', redeemResult.planId);
                       const purchasedAtResolved =
                         (redeemResult.purchasedAt || '').trim() || new Date().toISOString();

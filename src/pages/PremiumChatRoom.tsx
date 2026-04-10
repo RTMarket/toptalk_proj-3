@@ -13,6 +13,7 @@ import {
   persistPremiumFileMessage,
   persistPremiumTextMessage,
 } from '../lib/premiumRoomDbMessages';
+import { expireSinglePlanAfterPremiumRoomSessionEnd } from '../lib/singlePlanConsumption';
 
 interface Message {
   id: string;
@@ -356,8 +357,9 @@ export default function PremiumChatRoom() {
     if (overlayType === 'expired') return;
     try { removeActivePremiumRoom(roomId); } catch { /* ignore */ }
     void deleteAllPremiumMessagesForRoom(roomId);
+    if (amICreator) expireSinglePlanAfterPremiumRoomSessionEnd();
     setOverlayType('expired');
-  }, [roomLeft, roomId, roomMeta, overlayType]);
+  }, [roomLeft, roomId, roomMeta, overlayType, amICreator]);
 
   // Message expiration ticker
   useEffect(() => {
@@ -405,6 +407,7 @@ export default function PremiumChatRoom() {
     // 更新 Supabase 房间状态为已解散（供其他用户查询）
     supabase.from('rooms').update({ status: 'dissolved' }).eq('id', roomId).then(() => {});
     void deleteAllPremiumMessagesForRoom(roomId);
+    if (amICreator) expireSinglePlanAfterPremiumRoomSessionEnd();
     // 2秒后跳转高级聊天室列表页
     setTimeout(() => window.location.replace('/rooms-premium'), 2100);
   };
