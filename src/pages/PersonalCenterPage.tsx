@@ -7,7 +7,7 @@ import { clampNickname, isValidNickname, NICKNAME_MAX_LEN } from '../lib/nicknam
 import { isValidInviteCode, normalizeInviteCode, redeemInviteCode } from '../lib/inviteCodeApi';
 import { accountMe } from '../lib/accountApi';
 import { computePlanExpiresAtIso, computePlanExpiresAtMs, SINGLE_PLAN_DURATION_MS } from '../lib/planExpiry';
-import { isSingleConsumedForCurrentPurchase } from '../lib/singlePlanConsumption';
+import { clearSinglePlanConsumption, isSingleConsumedForCurrentPurchase } from '../lib/singlePlanConsumption';
 
 const planLabels: Record<string, string> = {
   free: '免费版', single: '单次高级', daily: '日卡', weekly: '周卡',
@@ -455,20 +455,23 @@ export default function PersonalCenterPage() {
                     try {
                       const redeemResult = await redeemInviteCode(inviteCode);
                       localStorage.setItem('toptalk_plan', redeemResult.planId);
-                      if (redeemResult.purchasedAt) localStorage.setItem('toptalk_plan_purchased', redeemResult.purchasedAt);
+                      const purchasedAtResolved =
+                        (redeemResult.purchasedAt || '').trim() || new Date().toISOString();
+                      localStorage.setItem('toptalk_plan_purchased', purchasedAtResolved);
+                      if (redeemResult.planId === 'single') clearSinglePlanConsumption();
                       localStorage.setItem('toptalk_plan_expires', redeemResult.expiresAt);
                       localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: redeemResult.planId, expireAt: redeemResult.expiresAt }));
                       // 立即更新本页状态（避免依赖 storage 事件导致显示不刷新）
                       setPlan(redeemResult.planId)
-                      setPlanPurchasedAt(redeemResult.purchasedAt || '')
+                      setPlanPurchasedAt(purchasedAtResolved)
                       setPlanExpiresAt(redeemResult.expiresAt)
-                      setUser(prev => prev ? { ...prev, plan: redeemResult.planId, planPurchasedAt: redeemResult.purchasedAt, planExpiresAt: redeemResult.expiresAt } : prev)
+                      setUser(prev => prev ? { ...prev, plan: redeemResult.planId, planPurchasedAt: purchasedAtResolved, planExpiresAt: redeemResult.expiresAt } : prev)
                       // 同步 user 信息（不影响登录态）
                       try {
                         const raw = localStorage.getItem('toptalk_user');
                         const u = raw ? JSON.parse(raw) : {};
                         u.plan = redeemResult.planId;
-                        u.planPurchasedAt = redeemResult.purchasedAt;
+                        u.planPurchasedAt = purchasedAtResolved;
                         u.planExpiresAt = redeemResult.expiresAt;
                         localStorage.setItem('toptalk_user', JSON.stringify(u));
                       } catch { /* ignore */ }
