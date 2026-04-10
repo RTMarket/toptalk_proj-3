@@ -725,13 +725,40 @@ export default function PremiumChatRoom() {
                 <span className="text-green-400 text-xs font-semibold">{onlineCount} 人在线</span>
               </div>
               {/* Realtime 状态 */}
-              {rtStatus !== 'ready' && (
-                <div className="flex items-center gap-2 bg-red-500/10 border border-red-500/25 rounded-lg px-3 py-1.5">
-                  <span className="text-red-300 text-xs font-semibold">
-                    {rtStatus === 'connecting' ? '实时连接中…' : '实时连接失败'}
-                  </span>
-                </div>
-              )}
+              <div
+                className={`flex items-center gap-2 rounded-lg px-3 py-1.5 border ${
+                  rtStatus === 'ready'
+                    ? 'bg-blue-500/10 border-blue-500/25'
+                    : rtStatus === 'connecting'
+                      ? 'bg-orange-400/10 border-orange-400/25'
+                      : 'bg-red-500/10 border-red-500/25'
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    rtStatus === 'ready'
+                      ? 'bg-blue-400'
+                      : rtStatus === 'connecting'
+                        ? 'bg-orange-400 animate-pulse'
+                        : 'bg-red-400'
+                  }`}
+                />
+                <span
+                  className={`text-xs font-semibold ${
+                    rtStatus === 'ready'
+                      ? 'text-blue-300'
+                      : rtStatus === 'connecting'
+                        ? 'text-orange-300'
+                        : 'text-red-300'
+                  }`}
+                >
+                  {rtStatus === 'ready'
+                    ? '实时已连接'
+                    : rtStatus === 'connecting'
+                      ? '实时连接加载中…'
+                      : '实时连接失败'}
+                </span>
+              </div>
               {/* 解散房间 */}
               {amICreator && (
                 <button onClick={() => setShowDissolveConfirm(true)}
