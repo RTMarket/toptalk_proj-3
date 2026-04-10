@@ -1,6 +1,6 @@
 ---
 description: 单次套餐（single）高级房创建/加入与产品说明已锁定，未经用户明确同意禁止改动
-globs: src/lib/singlePlanConsumption.ts,src/pages/PremiumRoomSelection.tsx,src/data/pricingData.ts,src/pages/PersonalCenterPage.tsx
+globs: src/lib/singlePlanConsumption.ts,src/pages/PremiumRoomSelection.tsx,src/pages/PremiumChatRoom.tsx,src/data/pricingData.ts,src/pages/PersonalCenterPage.tsx
 alwaysApply: true
 ---
 
@@ -27,9 +27,16 @@ alwaysApply: true
 5. **判断是否已消耗（`isSingleConsumedForCurrentPurchase`）**
    - 以 **`toptalk_plan_purchased`**（`getSinglePurchaseStamp()`）与 **`toptalk_single_consumed_purchase`** 对齐为核心；**`unknown`** 分支仅用于兼容历史脏数据，**禁止**为「整洁」改掉而导致新用户无法创建或老用户重复创建。
 
+6. **创建权已消耗后：房间会话结束即本地单次权益结束（仅 `single`；勿套用到日/周/月/企业）**
+   - 仅当 **`toptalk_plan === 'single'`** 且 **`isSingleConsumedForCurrentPurchase()`** 为真：创建者在 **解散房间** 或 **墙钟自然到期**（`PremiumChatRoom`）时调用 **`expireSinglePlanAfterPremiumRoomSessionEnd()`**。
+   - 效果：本地 **`toptalk_plan` → `free`**，清空 **`toptalk_plan_purchased` / `toptalk_plan_expires` / `toptalk_subscription`**，设 **`toptalk_single_session_ended`**，并同步 **`toptalk_user`** 为免费；个人中心倒计时与订阅展示与免费一致，便于再次兑换。
+   - **日 / 周 / 月 / 企业等非单次套餐**不以「高级房会话结束」作为套餐结束条件；其结束仅按 **套餐有效期到期**（见 `planExpiry` 与个人中心规则）。本条**仅**约束单次。
+   - **`/me` 仍短暂返回 `single` 时**：个人中心合并逻辑须配合 **`SINGLE_SESSION_ENDED_KEY`**，**不得**把已结束的单次写回本地（与 `subscriptionAnchor` 防「旧套餐复活」一并遵守）。
+
 ## 锁定范围（须用户同意后再动）
 
-- `src/lib/singlePlanConsumption.ts`：`getSinglePurchaseStamp`、`clearSinglePlanConsumption`、`isSingleConsumedForCurrentPurchase` 的语义与 localStorage 键名。
+- `src/lib/singlePlanConsumption.ts`：`SINGLE_SESSION_ENDED_KEY`、`clearSingleSessionEndedGuard`、`expireSinglePlanAfterPremiumRoomSessionEnd`、`getSinglePurchaseStamp`、`clearSinglePlanConsumption`、`isSingleConsumedForCurrentPurchase` 的语义与 localStorage 键名。
+- `src/pages/PremiumChatRoom.tsx`：创建者 **解散** / **墙钟到期** 时与 **`expireSinglePlanAfterPremiumRoomSessionEnd`** 的衔接（仅创建者、且与单次消耗语义一致）。
 - `src/pages/PremiumRoomSelection.tsx`：`markSingleConsumedNow`、`singleConsumed` / `canCreate`、创建按钮与 **`handleCreateRoom` 内与 `single` 相关的校验与 `markSingleConsumedNow` 调用**；单次套餐固定规则提示与「已消耗 / 名额满」相关文案（与产品一致前提下可改错别字，**不可改规则含义**）。
 - `src/data/pricingData.ts`：**仅** `id: 'single'` 这一条套餐（含 `roomCount`、`features`、名称等面向用户的单次说明）。
 - `src/pages/PersonalCenterPage.tsx`：**邀请码兑换成功**分支中，与 **`planId === 'single'`**、`toptalk_plan_purchased` 兜底、`clearSinglePlanConsumption`、以及单次套餐说明小字（`isSingleConsumedForCurrentPurchase` 相关展示）**直接相关**的代码。

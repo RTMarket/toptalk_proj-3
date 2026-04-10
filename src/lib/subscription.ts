@@ -1,5 +1,6 @@
 import { normalizeClientAnonKey } from './anonKey'
 import { computePlanExpiresAtIso } from './planExpiry'
+import { replaceLatestSubscriptionPurchasedAt } from './subscriptionAnchor'
 
 const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL as string | undefined)?.trim() || ''
 const ANON_KEY = normalizeClientAnonKey(import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined)
@@ -54,6 +55,7 @@ export async function syncSubscriptionFromApprovedOrder(email: string): Promise<
     localStorage.setItem('toptalk_plan', planId)
     localStorage.setItem('toptalk_plan_purchased', purchasedAtIso)
     localStorage.setItem('toptalk_plan_expires', expiresAt)
+    replaceLatestSubscriptionPurchasedAt(purchasedAtIso)
 
     const stored = localStorage.getItem('toptalk_user')
     const user = stored ? JSON.parse(stored) : {}

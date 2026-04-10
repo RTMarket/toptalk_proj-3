@@ -1,6 +1,6 @@
 ---
 description: 个人中心套餐/订阅倒计时与开通规则已锁定，改动前须征得用户同意
-globs: src/lib/planExpiry.ts,src/lib/subscription.ts,src/pages/PersonalCenterPage.tsx,supabase/functions/account/index.ts
+globs: src/lib/planExpiry.ts,src/lib/subscription.ts,src/lib/subscriptionAnchor.ts,src/pages/PersonalCenterPage.tsx,supabase/functions/account/index.ts
 alwaysApply: true
 ---
 
@@ -8,11 +8,27 @@ alwaysApply: true
 
 用户已确认：个人中心「套餐剩余有效期」的**计时口径、展示格式、与服务端/本地同步方式**已按产品规则跑通。以下视为**稳定区**，**未经用户明确允许，禁止擅自修改、重构或「顺手优化」**。
 
+## 产品规则（订阅时间线 / 展示源）
+
+1. **「当下套餐」一律以最近一次开通为准（与之前订过哪种无关）**
+   - **日卡 / 周卡 / 月卡 / 企业版 / 单次高级 / 其它付费套餐**：个人中心的**当前套餐身份**与**倒计时计算**，都只认**时间上最新的一笔**开通（邀请码兑换或订单同步）；再订阅一笔后，展示与计时**全部切换到新套餐**，不得再按更早一笔去算。
+   - 本地维护 **`toptalk_latest_subscription_purchased_at`**（`subscriptionAnchor.ts`）：邀请码兑换成功、订单同步写入套餐、以及 **`/me` 合并写入且带可解析的 `planPurchasedAt`** 时会更新（兑换为 **replace**；`/me` 为 **若更新则 bump**）。
+   - **`/me` 返回的 `plan` + `planPurchasedAt` 若早于上述锚点**（严格早于），视为**已被后续开通覆盖的旧记录**，**禁止**写回 `toptalk_plan_*` / `toptalk_user`（例如：先前开过日/周/月/企业，再兑单次并结束后，不应被更早的 `planPurchasedAt` 顶回旧套餐）。
+
+2. **「当下套餐结束」≠ 同一种口径：单次 vs 其它套餐（勿混用）**
+   - **`single`（单次高级）**：在**创建权已消耗**的前提下，**仅当创建者侧高级房会话结束**（解散或房间墙钟到期，见 `PremiumChatRoom` + `expireSinglePlanAfterPremiumRoomSessionEnd`），本地即视为**本次单次权益结束**，个人中心按 **免费版** 展示；**不是**用「又订了别种套餐」那种有效期到期语义来代替这一条。
+   - **日 / 周 / 月 / 企业等（非单次）**：**无**「会话结束即套餐结束」规则；**仅当套餐剩余有效期到期**（`planExpiry` 口径下的 `plan_expires_at` / 倒计时归零）后，才视为该笔套餐用尽，个人中心进入 **免费版**（除非再次订阅）。
+   - 再次订阅后，重新适用第 1 条：**只以最新一笔开通**为展示与计时依据。
+
+3. **与单次会话结束守卫、`subscriptionAnchor` 的协同**
+   - 单次创建权用完后，创建者解散/房间到期 → 本地免费 + **`toptalk_single_session_ended`**；`/me` 合并须同时遵守 **单次结束守卫** 与 **锚点防旧套餐**，不得复活**已结束单次**或**更早开通的任意旧套餐**。
+
 ## 锁定范围（须用户同意后再动）
 
 - `src/lib/planExpiry.ts`：**套餐到期时间计算**（单次时长、日/周/月「N×24h − 1 分钟」等）。此为**唯一口径来源**，其它处应与之一致。
-- `src/lib/subscription.ts`：历史订单同步到本地 `toptalk_plan_*` 时，**不得改到期计算公式**导致与 `planExpiry` 不一致。
-- `src/pages/PersonalCenterPage.tsx`：与套餐相关的 **`useCountdown` / `formatCountdown`（含每秒刷新与是否显示秒）**、**本地 `toptalk_plan_*` 校准**、**`accountMe` 合并逻辑**（含「服务端误报 free 时勿覆盖本地有效订阅」）、**订阅 Tab 内套餐剩余时间展示**。
+- `src/lib/subscription.ts`：历史订单同步到本地 `toptalk_plan_*` 时，**不得改到期计算公式**导致与 `planExpiry` 不一致；写入套餐时须与 **`subscriptionAnchor`** 一致（新订单开通须更新锚点）。
+- `src/lib/subscriptionAnchor.ts`：**锚点键名**、`replace` / `bump` / `clear` 语义，以及 **`isServerPlanOlderThanLatestSubscription` / `shouldRejectServerPlanWithoutPurchasedAtWhenLocalFree`** 的用途（防旧套餐写回）。
+- `src/pages/PersonalCenterPage.tsx`：与套餐相关的 **`useCountdown` / `formatCountdown`（含每秒刷新与是否显示秒）**、**本地 `toptalk_plan_*` 校准**、**`accountMe` 合并逻辑**（含「服务端误报 free 时勿覆盖本地有效订阅」、**锚点防旧套餐**、单次结束守卫）、**邀请码兑换**与锚点更新、**订阅 Tab 内套餐剩余时间展示**。
 - `supabase/functions/account/index.ts`：与 **邀请码兑换（redeem-invite）写入 `plan_purchased_at` / `plan_expires_at`**、以及 **`/me` 返回用户 `plan` 字段**相关的逻辑。**禁止**在未说明后果的情况下改套餐写入规则；该文件若还有登录/注册等其它逻辑，非套餐相关改动仍应谨慎，但**套餐时间规则**必须遵守本节。
 
 ## 必须遵守

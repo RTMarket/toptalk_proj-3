@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { accountLogout } from '../../lib/accountApi';
+import { clearLatestSubscriptionPurchasedAt } from '../../lib/subscriptionAnchor';
 
 interface NavUser {
   nickname: string;
@@ -66,6 +67,7 @@ export default function Navbar({ hideAuth = false }: { hideAuth?: boolean }) {
     accountLogout().finally(() => {
       localStorage.removeItem('toptalk_user');
       localStorage.removeItem('toptalk_plan');
+      clearLatestSubscriptionPurchasedAt();
       setUser(null);
       navigate('/');
       setUserMenuOpen(false);

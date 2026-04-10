@@ -8,6 +8,12 @@ import { isValidInviteCode, normalizeInviteCode, redeemInviteCode } from '../lib
 import { accountMe } from '../lib/accountApi';
 import { computePlanExpiresAtIso, computePlanExpiresAtMs, SINGLE_PLAN_DURATION_MS } from '../lib/planExpiry';
 import {
+  bumpLatestSubscriptionPurchasedAtIfNewer,
+  isServerPlanOlderThanLatestSubscription,
+  replaceLatestSubscriptionPurchasedAt,
+  shouldRejectServerPlanWithoutPurchasedAtWhenLocalFree,
+} from '../lib/subscriptionAnchor';
+import {
   clearSinglePlanConsumption,
   clearSingleSessionEndedGuard,
   isSingleConsumedForCurrentPurchase,
@@ -205,10 +211,14 @@ export default function PersonalCenterPage() {
       try {
         const me = await accountMe();
         const nextPlan = (me?.plan || 'free').trim() || 'free';
-        let nextPurchasedAt = String(me?.planPurchasedAt || '').trim();
+        const mePurchasedRaw = String(me?.planPurchasedAt || '').trim();
+        let nextPurchasedAt = mePurchasedRaw;
         let nextExpiresAt = String(me?.planExpiresAt || '').trim();
 
         const localPlanGuard = (localStorage.getItem('toptalk_plan') || 'free').trim();
+        const serverPlanStale =
+          isServerPlanOlderThanLatestSubscription(mePurchasedRaw) ||
+          shouldRejectServerPlanWithoutPurchasedAtWhenLocalFree(nextPlan, mePurchasedRaw, localPlanGuard);
         const localExpGuard = toMs(localStorage.getItem('toptalk_plan_expires'));
         const localActiveGuard = localPlanGuard !== 'free' && localExpGuard != null && localExpGuard > Date.now();
 
@@ -235,7 +245,7 @@ export default function PersonalCenterPage() {
             clearSingleSessionEndedGuard();
           }
 
-          if (!(nextPlan === 'single' && singleSessionEnded)) {
+          if (!serverPlanStale && !(nextPlan === 'single' && singleSessionEnded)) {
             if (!nextExpiresAt && nextPurchasedAt) {
               const pm = toMs(nextPurchasedAt);
               if (pm) {
@@ -254,6 +264,7 @@ export default function PersonalCenterPage() {
                 localStorage.setItem('toptalk_subscription', JSON.stringify({ planId: nextPlan, expireAt: nextExpiresAt }));
               }
             } catch { /* ignore */ }
+            if (nextPurchasedAt) bumpLatestSubscriptionPurchasedAtIfNewer(nextPurchasedAt);
           }
         }
 
@@ -264,6 +275,7 @@ export default function PersonalCenterPage() {
             skipUserPlanWrite = true;
           }
         } catch { /* ignore */ }
+        if (serverPlanStale) skipUserPlanWrite = true;
         if (!(nextPlan === 'free' && localActiveGuard) && !skipUserPlanWrite) {
           try {
             const raw = localStorage.getItem('toptalk_user');
@@ -480,6 +492,7 @@ export default function PersonalCenterPage() {
                       localStorage.setItem('toptalk_plan', redeemResult.planId);
                       const purchasedAtResolved =
                         (redeemResult.purchasedAt || '').trim() || new Date().toISOString();
+                      replaceLatestSubscriptionPurchasedAt(purchasedAtResolved);
                       localStorage.setItem('toptalk_plan_purchased', purchasedAtResolved);
                       if (redeemResult.planId === 'single') clearSinglePlanConsumption();
                       localStorage.setItem('toptalk_plan_expires', redeemResult.expiresAt);
