@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { pricingPlans } from '../data/pricingData';
 import { supabase } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
+import { markPendingPremiumChatNavigation } from '../lib/roomConstants';
 import {
   planIdToPremiumEntryTier,
   premiumEntryPath,
@@ -274,6 +275,8 @@ export default function PremiumRoomSelection({ tier }: { tier: PremiumEntryTier 
   }, [tier, navigate, subscription]);
 
   const subscribed = isSubscribed(subscription);
+  /** 免费分档路由下绝不展示「付费创建」UI，避免短暂错档或缓存误判 */
+  const showPaidCreate = subscribed && tier !== 'free';
 
   const loadRooms = () => {
     try {
@@ -389,6 +392,7 @@ export default function PremiumRoomSelection({ tier }: { tier: PremiumEntryTier 
     // 统计：创建房间
     postRoomEvent({ roomId: newId, roomType: 'premium', event: 'create' }).catch(() => {});
     const label = durationOptions.find(o => o.value === createDuration)?.label || '1小时';
+    markPendingPremiumChatNavigation(newId);
     navigate(`/premium-chat?roomId=${newId}&destroy=${createDuration}&duration=${encodeURIComponent(label)}&password=${createPassword}`);
   };
 
@@ -455,6 +459,7 @@ export default function PremiumRoomSelection({ tier }: { tier: PremiumEntryTier 
     }
 
     setJoinLoading(false);
+    markPendingPremiumChatNavigation(joinRoomId);
     // 标记加入也算活跃房间
     // 活跃倒计时必须以“房间创建时间”计算，不能用加入时间重置
     upsertActivePremiumRoom({
@@ -575,7 +580,7 @@ export default function PremiumRoomSelection({ tier }: { tier: PremiumEntryTier 
           </div>
 
           {/* 右：创建 或 订阅 */}
-          {subscribed ? (
+          {showPaidCreate ? (
             <div className="bg-[#0a1628] border border-yellow-400/20 rounded-2xl p-6">
               <div className="flex items-center gap-3 mb-5">
                 <div className="w-10 h-10 rounded-xl bg-yellow-400/20 border border-yellow-400/25 flex items-center justify-center"><span className="text-xl">🔒</span></div>
@@ -717,7 +722,10 @@ export default function PremiumRoomSelection({ tier }: { tier: PremiumEntryTier 
                     </div>
                     <div className="mt-2 flex items-center gap-3">
                       <button
-                        onClick={() => navigate(`/premium-chat?roomId=${r.id}&destroy=${r.destroySeconds}&password=${encodeURIComponent(r.password || '')}`)}
+                        onClick={() => {
+                          markPendingPremiumChatNavigation(r.id);
+                          navigate(`/premium-chat?roomId=${r.id}&destroy=${r.destroySeconds}&password=${encodeURIComponent(r.password || '')}`);
+                        }}
                         className="text-yellow-400 text-xs hover:text-yellow-300 font-medium transition-colors"
                       >
                         进入房间 →

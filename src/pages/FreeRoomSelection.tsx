@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
 import { postRoomEvent } from '../lib/accountApi';
-import { INSTANT_ROOM_SECONDS } from '../lib/roomConstants';
+import { INSTANT_ROOM_SECONDS, markPendingInstantChatNavigation } from '../lib/roomConstants';
 
 interface Room {
   id: string;
@@ -161,6 +161,15 @@ export default function FreeRoomSelection() {
     }
 
     setJoinLoading(false);
+    // 允许再次加入同一间即时房（与高级房一致：密码校验通过后清「离开」标记）
+    try {
+      const leftRooms: Record<string, string> = JSON.parse(localStorage.getItem('toptalk_left') || '{}');
+      if (leftRooms[joinRoomId]) {
+        delete leftRooms[joinRoomId];
+        localStorage.setItem('toptalk_left', JSON.stringify(leftRooms));
+      }
+    } catch { /* ignore */ }
+
     // 加入者同一时间只能加入一间：加入也写入活跃房间（离开页面会清掉）
     // 活跃倒计时按“房间创建时间”计算
     const createdAt = (localFound as any)?.createdAt || supabaseCreatedAt || new Date().toISOString()
@@ -170,6 +179,7 @@ export default function FreeRoomSelection() {
     setActiveRoomRemaining(
       Math.max(0, INSTANT_ROOM_SECONDS * 1000 - (Date.now() - new Date(createdAt).getTime()))
     );
+    markPendingInstantChatNavigation(joinRoomId);
     navigate(`/free-chat?roomId=${joinRoomId}&destroy=${INSTANT_ROOM_SECONDS}`);
   };
 
@@ -217,6 +227,7 @@ export default function FreeRoomSelection() {
     setCreateLoading(false);
     // 统计：创建房间
     postRoomEvent({ roomId: newId, roomType: 'instant', event: 'create' }).catch(() => {});
+    markPendingInstantChatNavigation(newId);
     navigate(`/free-chat?roomId=${newId}&destroy=${INSTANT_ROOM_SECONDS}`);
   };
 

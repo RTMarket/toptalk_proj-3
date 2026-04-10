@@ -3,7 +3,12 @@ import { useSearchParams } from 'react-router-dom';
 import { supabase, supabaseConfigHint, supabaseConfigOk } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
 import { postRoomEvent } from '../lib/accountApi';
-import { INSTANT_ROOM_SECONDS, isNavigationReload, isRoomWallClockExpired } from '../lib/roomConstants';
+import {
+  consumePendingInstantChatNavigation,
+  INSTANT_ROOM_SECONDS,
+  isNavigationReload,
+  isRoomWallClockExpired,
+} from '../lib/roomConstants';
 import { newMessageRowId } from '../lib/messageRowId';
 
 interface Message {
@@ -92,7 +97,8 @@ export default function FreeChatRoom() {
   const [searchParams] = useSearchParams();
   const roomId = searchParams.get('roomId') || '——';
 
-  const reloadLeave = useMemo(() => isNavigationReload(), []);
+  /** true：按「浏览器刷新」处理，跳过 Realtime/进房逻辑，必要时整页回列表（SPA 从列表进房会先消费 pending 标为 false） */
+  const [suppressChatDueToReload, setSuppressChatDueToReload] = useState(() => isNavigationReload());
 
   const [rtStatus, setRtStatus] = useState<'connecting' | 'ready' | 'failed'>('connecting');
 
@@ -117,26 +123,35 @@ export default function FreeChatRoom() {
   const nicknameRef = useRef('匿名用户');
   const [userOrder, setUserOrder] = useState<string[]>([]);
 
-  // 刷新页面 = 离开房间（与点「离开」同等本地规则），然后回列表
+  // 刷新页面 = 离开房间（与点「离开」同等本地规则），然后回列表。
+  // SPA 从 /rooms 进入：整站 NavigationTiming 可能仍是 reload，须用 pending 区分。
   useLayoutEffect(() => {
-    if (!roomId || roomId === '——' || !reloadLeave) return;
+    if (!roomId || roomId === '——') return;
+    if (consumePendingInstantChatNavigation(roomId)) {
+      setSuppressChatDueToReload(false);
+      return;
+    }
+    if (!isNavigationReload()) {
+      setSuppressChatDueToReload(false);
+      return;
+    }
     applyInstantChatLeaveOnReload(roomId);
     window.location.replace('/rooms');
-  }, [roomId, reloadLeave]);
+  }, [roomId]);
 
   // 统计：进入房间（刷新离开时不计为进入）
   useEffect(() => {
-    if (!supabaseConfigOk || !roomId || roomId === '——' || reloadLeave) return;
+    if (!supabaseConfigOk || !roomId || roomId === '——' || suppressChatDueToReload) return;
     postRoomEvent({ roomId, roomType: 'instant', event: 'enter' }).catch(() => {});
     return () => {
-      if (reloadLeave) return;
+      if (suppressChatDueToReload) return;
       postRoomEvent({ roomId, roomType: 'instant', event: 'leave' }).catch(() => {});
     };
-  }, [roomId, reloadLeave]);
+  }, [roomId, suppressChatDueToReload]);
 
   // 拉取房间创建时间：即时房固定 15 分钟，所有人倒计时一致
   useEffect(() => {
-    if (!supabaseConfigOk || !roomId || roomId === '——' || reloadLeave) return;
+    if (!supabaseConfigOk || !roomId || roomId === '——' || suppressChatDueToReload) return;
     let cancelled = false;
     void (async () => {
       const { data } = await supabase
@@ -161,7 +176,7 @@ export default function FreeChatRoom() {
     return () => {
       cancelled = true;
     };
-  }, [roomId, reloadLeave]);
+  }, [roomId, suppressChatDueToReload]);
 
   // 房间倒计时：created_at + 15 分钟（与谁加入、是否刷新 URL 无关）
   useEffect(() => {
@@ -189,7 +204,7 @@ export default function FreeChatRoom() {
 
   // 关闭/离开页面：也算离开房间，并释放“活跃即时房间”占用
   useEffect(() => {
-    if (!supabaseConfigOk || !roomId || roomId === '——' || reloadLeave) return;
+    if (!supabaseConfigOk || !roomId || roomId === '——' || suppressChatDueToReload) return;
     const release = () => {
       try {
         const raw = localStorage.getItem('toptalk_active_room');
@@ -203,7 +218,7 @@ export default function FreeChatRoom() {
     };
     window.addEventListener('pagehide', release);
     return () => window.removeEventListener('pagehide', release);
-  }, [roomId, reloadLeave]);
+  }, [roomId, suppressChatDueToReload]);
 
   // ── 读取昵称 ────────────────────────────────────────
   useEffect(() => {
@@ -220,7 +235,7 @@ export default function FreeChatRoom() {
 
   // ── Supabase Realtime：广播消息 + Presence 在线人数（跨设备一致） ──
   useEffect(() => {
-    if (!supabaseConfigOk || !roomId || roomId === '——' || reloadLeave) return;
+    if (!supabaseConfigOk || !roomId || roomId === '——' || suppressChatDueToReload) return;
     const uid = userIdRef.current;
     const channel = supabase.channel(`free_room_${roomId}`, {
       config: {
@@ -296,21 +311,21 @@ export default function FreeChatRoom() {
         channel.unsubscribe();
       } catch { /* ignore */ }
     };
-  }, [roomId, reloadLeave]);
+  }, [roomId, suppressChatDueToReload]);
 
   // 如果长时间没订阅成功，提示用户（网络/Realtime 异常）
   useEffect(() => {
-    if (!supabaseConfigOk || reloadLeave) return;
+    if (!supabaseConfigOk || suppressChatDueToReload) return;
     setRtStatus('connecting');
     const t = window.setTimeout(() => {
       setRtStatus(s => (s === 'ready' ? s : 'failed'));
     }, 6000);
     return () => window.clearTimeout(t);
-  }, [roomId, reloadLeave]);
+  }, [roomId, suppressChatDueToReload]);
 
   // ── 进入房间权限检查 ─────────────────────────────────
   useEffect(() => {
-    if (reloadLeave) return;
+    if (suppressChatDueToReload) return;
     const dissolved: string[] = JSON.parse(localStorage.getItem('toptalk_dissolved') || '[]');
     if (dissolved.includes(roomId)) { window.location.href = '/rooms'; return; }
 
@@ -332,7 +347,7 @@ export default function FreeChatRoom() {
         } catch {}
       })();
     }
-  }, [reloadLeave]);
+  }, [roomId, suppressChatDueToReload]);
 
   // ── 消息过期检测 ────────────────────────────────────
   useEffect(() => {
@@ -471,7 +486,7 @@ export default function FreeChatRoom() {
     );
   }
 
-  if (reloadLeave) {
+  if (suppressChatDueToReload) {
     return <div className="min-h-screen bg-[#050d1a]" />;
   }
 

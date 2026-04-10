@@ -202,6 +202,28 @@ export default function PersonalCenterPage() {
         }
       } catch { /* ignore */ }
 
+      // 本地墙钟已过期：立即按免费展示并清套餐缓存（避免服务端尚未同步时个人中心仍显示旧套餐）
+      const finalExpMs = toMs(expires);
+      if (p !== 'free' && finalExpMs != null && finalExpMs <= Date.now()) {
+        p = 'free';
+        purchased = '';
+        expires = '';
+        try {
+          localStorage.setItem('toptalk_plan', 'free');
+          localStorage.removeItem('toptalk_plan_purchased');
+          localStorage.removeItem('toptalk_plan_expires');
+          localStorage.removeItem('toptalk_subscription');
+          const rawUser = localStorage.getItem('toptalk_user');
+          if (rawUser) {
+            const u = JSON.parse(rawUser) as Record<string, unknown>;
+            u.plan = 'free';
+            delete u.planPurchasedAt;
+            delete u.planExpiresAt;
+            localStorage.setItem('toptalk_user', JSON.stringify(u));
+          }
+        } catch { /* ignore */ }
+      }
+
       setPlan(p); setPlanPurchasedAt(purchased); setPlanExpiresAt(expires);
     };
     loadUser();

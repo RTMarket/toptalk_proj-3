@@ -3,7 +3,11 @@ import { useSearchParams } from 'react-router-dom';
 import { supabase, supabaseConfigHint, supabaseConfigOk } from '../lib/supabase';
 import Navbar from '../components/layout/Navbar';
 import { postRoomEvent } from '../lib/accountApi';
-import { isNavigationReload, isRoomWallClockExpired } from '../lib/roomConstants';
+import {
+  consumePendingPremiumChatNavigation,
+  isNavigationReload,
+  isRoomWallClockExpired,
+} from '../lib/roomConstants';
 import { getActivePremiumRooms, removeActivePremiumRoom, upsertActivePremiumRoom } from '../lib/premiumActiveRooms';
 import { getPremiumRoomStorageBucket, uploadPremiumRoomFile } from '../lib/premiumRoomStorage';
 import {
@@ -141,7 +145,7 @@ export default function PremiumChatRoom() {
   } | null>(null);
   const [fileUploading, setFileUploading] = useState(false);
 
-  const reloadLeave = useMemo(() => isNavigationReload(), []);
+  const [suppressChatDueToReload, setSuppressChatDueToReload] = useState(() => isNavigationReload());
 
   // ── 读取昵称（用于消息展示/广播）────────────────────────
   useEffect(() => {
@@ -164,16 +168,24 @@ export default function PremiumChatRoom() {
     } catch { return false; }
   })();
 
-  // 刷新页面 = 离开房间，回列表（与点「离开」同等本地规则）
+  // 刷新页面 = 离开房间，回列表。SPA 从列表进房时 NavigationTiming 可能仍是整站 reload，须用 pending 区分。
   useLayoutEffect(() => {
-    if (!roomId || roomId === '------' || !reloadLeave) return;
+    if (!roomId || roomId === '------') return;
+    if (consumePendingPremiumChatNavigation(roomId)) {
+      setSuppressChatDueToReload(false);
+      return;
+    }
+    if (!isNavigationReload()) {
+      setSuppressChatDueToReload(false);
+      return;
+    }
     applyPremiumLeaveOnReload(roomId, amICreator);
     window.location.replace(getPremiumListPathForCurrentUser());
-  }, [roomId, reloadLeave, amICreator]);
+  }, [roomId, amICreator]);
 
   // 始终以 Supabase rooms.created_at + destroy_seconds 为唯一倒计时来源；再同步本地活跃列表
   useEffect(() => {
-    if (!supabaseConfigOk || !roomId || roomId === '------' || reloadLeave) return;
+    if (!supabaseConfigOk || !roomId || roomId === '------' || suppressChatDueToReload) return;
     let cancelled = false;
     void (async () => {
       const { data } = await supabase
@@ -215,7 +227,7 @@ export default function PremiumChatRoom() {
       postRoomEvent({ roomId, roomType: 'premium', event: 'enter' }).catch(() => {});
     })();
     return () => {
-      if (reloadLeave) return;
+      if (suppressChatDueToReload) return;
       postRoomEvent({ roomId, roomType: 'premium', event: 'leave' }).catch(() => {});
       try {
         const cur = getActivePremiumRooms().find(r => r.id === roomId);
@@ -223,11 +235,11 @@ export default function PremiumChatRoom() {
       } catch { /* ignore */ }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, reloadLeave, amICreator, destroyParam]);
+  }, [roomId, suppressChatDueToReload, amICreator, destroyParam]);
 
   // ── 进房：拉取未过期的历史消息（后进用户可见仍在倒计时中的消息）──────────
   useEffect(() => {
-    if (!supabaseConfigOk || !roomId || roomId === '------' || reloadLeave) return;
+    if (!supabaseConfigOk || !roomId || roomId === '------' || suppressChatDueToReload) return;
     let cancelled = false;
     void (async () => {
       const loaded = await fetchPremiumRoomMessagesFromDb(roomId, userIdRef.current);
@@ -250,7 +262,7 @@ export default function PremiumChatRoom() {
 
   // ── Supabase Realtime 订阅 ──────────────────────────
   useEffect(() => {
-    if (!supabaseConfigOk || !roomId || roomId === '------' || reloadLeave) return;
+    if (!supabaseConfigOk || !roomId || roomId === '------' || suppressChatDueToReload) return;
     const uid = userIdRef.current;
     const channel = supabase.channel(`premium_room_${roomId}`, {
       config: {
@@ -327,16 +339,16 @@ export default function PremiumChatRoom() {
       } catch { /* ignore */ }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [roomId, reloadLeave]);
+  }, [roomId, suppressChatDueToReload]);
 
   useEffect(() => {
-    if (!supabaseConfigOk || reloadLeave) return;
+    if (!supabaseConfigOk || suppressChatDueToReload) return;
     setRtStatus('connecting');
     const t = window.setTimeout(() => {
       setRtStatus(s => (s === 'ready' ? s : 'failed'));
     }, 6000);
     return () => window.clearTimeout(t);
-  }, [roomId, reloadLeave]);
+  }, [roomId, suppressChatDueToReload]);
 
   // Room countdown（以“创建时间”为基准计算，保证所有加入者看到一致的剩余时间）
   useEffect(() => {
@@ -434,7 +446,7 @@ export default function PremiumChatRoom() {
 
   // 离开网页/关闭标签页：也算离开房间（加入者需释放活跃占用）
   useEffect(() => {
-    if (!roomId || roomId === '------' || reloadLeave) return;
+    if (!roomId || roomId === '------' || suppressChatDueToReload) return;
     const release = () => {
       try {
         const cur = getActivePremiumRooms().find(r => r.id === roomId);
@@ -446,7 +458,7 @@ export default function PremiumChatRoom() {
     };
     window.addEventListener('pagehide', release);
     return () => window.removeEventListener('pagehide', release);
-  }, [roomId, reloadLeave]);
+  }, [roomId, suppressChatDueToReload]);
 
   const handleSendFile = async () => {
     if (!pendingFile || fileUploading) return;
@@ -676,7 +688,7 @@ export default function PremiumChatRoom() {
     );
   }
 
-  if (reloadLeave) {
+  if (suppressChatDueToReload) {
     return <div className="min-h-screen bg-[#050d1a]" />;
   }
 
