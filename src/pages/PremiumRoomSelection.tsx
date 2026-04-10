@@ -38,9 +38,15 @@ function isPremiumRoomCreator(roomId: string): boolean {
   } catch { return false; }
 }
 
+/** 非空且非 free 的套餐 id 才算可创建高级房的「付费档」 */
+function isPaidPlanId(planId: string | undefined | null): boolean {
+  const p = String(planId ?? '').trim().toLowerCase();
+  return !!p && p !== 'free';
+}
+
 function isSubscribed(sub: Subscription | null): boolean {
   if (!sub) return false;
-  if (sub.planId === 'free') return false;
+  if (!isPaidPlanId(sub.planId)) return false;
   const t = new Date(sub.expireAt).getTime();
   if (!Number.isFinite(t)) return false;
   if (t < Date.now()) return false;
@@ -312,23 +318,30 @@ export default function PremiumRoomSelection() {
 
   const currentPlanId = subscription?.planId || localStorage.getItem('toptalk_plan') || 'free';
   const currentPlan = pricingPlans.find(p => p.id === currentPlanId) || pricingPlans.find(p => p.id === 'free')!;
-  const maxActive = subscribed ? (Number(currentPlan.roomCount) || 1) : 0;
+  /** 高级房「同时活跃」槽位：付费=套餐 roomCount；未付费=1（仅可加入一间，不可创建） */
+  const premiumSlotLimit = subscribed ? (Number(currentPlan.roomCount) || 1) : 1;
   const activeCount = activeRooms.length;
   const activeMemberCount = activeRooms.filter(r => r.role === 'member').length;
-  // 加入者：同一时刻只能占 1 间（离开房间后活跃列表移除即可再加入其他房间）
-  const joinWithinPlan = !subscribed || activeCount < maxActive;
+  const joinWithinPlan = activeCount < premiumSlotLimit;
   const canJoin = loggedIn && activeMemberCount < 1 && joinWithinPlan;
   const singleConsumed = currentPlanId === 'single' && isSingleConsumedForCurrentPurchase();
-  const canCreate = subscribed && !singleConsumed && activeCount < maxActive;
+  const canCreate =
+    subscribed && isPaidPlanId(currentPlanId) && !singleConsumed && activeCount < premiumSlotLimit;
 
   const handleCreateRoom = async () => {
     if (!createPassword || !/^\d{4}$/.test(createPassword)) { setCreateError('请输入4位数字房间密码'); return; }
-    if (!subscribed) { setCreateError('请先订阅套餐'); return; }
+    if (!subscribed || !isPaidPlanId(currentPlanId)) {
+      setCreateError('创建高级聊天室需要先开通付费套餐。免费版仅可使用即时聊天室，高级房只能加入他人房间。');
+      return;
+    }
     if (currentPlanId === 'single' && isSingleConsumedForCurrentPurchase()) {
       setCreateError('单次高级权益已使用：仅允许创建 1 个高级房（创建成功即消耗）。如需再创建请升级/更换套餐。');
       return;
     }
-    if (activeRooms.length >= maxActive) { setCreateError(`当前套餐最多同时活跃 ${maxActive} 个高级房间（创建/加入都算）`); return; }
+    if (activeRooms.length >= premiumSlotLimit) {
+      setCreateError(`当前已有 ${premiumSlotLimit} 个活跃高级房间（创建/加入都算），请先离开、解散或等房间结束后再操作`);
+      return;
+    }
     setCreateError('');
     setCreateLoading(true);
     await new Promise(r => setTimeout(r, 500));
@@ -381,8 +394,10 @@ export default function PremiumRoomSelection() {
       setJoinError('同一时间只能加入一间高级聊天室，请先离开当前房间后再加入其他房间');
       return;
     }
-    if (subscribed && activeRooms.length >= maxActive) {
-      setJoinError(`当前套餐最多同时活跃 ${maxActive} 个高级房间（创建/加入都算），请先结束或解散其中一个`);
+    if (activeRooms.length >= premiumSlotLimit) {
+      setJoinError(
+        `当前已有 ${premiumSlotLimit} 个活跃高级房间（创建/加入都算），请先离开、解散或等房间结束后再加入`
+      );
       return;
     }
 
@@ -499,13 +514,13 @@ export default function PremiumRoomSelection() {
               </div>
             )}
 
-            {loggedIn && activeMemberCount < 1 && subscribed && activeCount >= maxActive && (
+            {loggedIn && activeMemberCount < 1 && activeCount >= premiumSlotLimit && (
               <div className="bg-orange-400/10 border border-orange-400/20 rounded-xl px-4 py-3 mb-3 flex items-center gap-2">
                 <svg className="w-4 h-4 text-orange-400 animate-pulse flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
                 <span className="text-orange-400 text-xs font-medium">
-                  当前套餐最多同时活跃 {maxActive} 个高级房间（创建/加入都算），请先结束或解散其中一个
+                  当前已达到可同时占用的高级房间上限（{premiumSlotLimit}，创建/加入都算），请先离开、解散或等房间结束后再操作
                 </span>
               </div>
             )}
@@ -540,8 +555,8 @@ export default function PremiumRoomSelection() {
                     ? '请先登录'
                     : activeMemberCount >= 1
                       ? '已有加入中的房间'
-                      : subscribed && activeCount >= maxActive
-                        ? '已达套餐上限'
+                      : activeCount >= premiumSlotLimit
+                        ? '已达活跃上限'
                         : '进入聊天室'}
               </button>
             </div>
@@ -585,7 +600,7 @@ export default function PremiumRoomSelection() {
                       </>
                     ) : (
                       <>
-                        当前套餐最多同时活跃 {maxActive} 个高级房间（创建/加入都算）。若房间仍在计时内会占用名额；创建者点「离开」不等于解散，需回房「解散房间」或等到期释放。也可刷新本页以同步已解散/已结束的房间。
+                        当前最多同时活跃 {premiumSlotLimit} 个高级房间（创建/加入都算）。若房间仍在计时内会占用名额；创建者点「离开」不等于解散，需回房「解散房间」或等到期释放。也可刷新本页以同步已解散/已结束的房间。
                       </>
                     )}
                   </span>
@@ -618,7 +633,7 @@ export default function PremiumRoomSelection() {
                   {createLoading ? '⟳' : '🔒'} {createLoading ? '创建中...' : !canCreate ? '已达上限' : '创建高级聊天室'}
                 </button>
                 {subscribed && (
-                  <p className="text-center text-gray-600 text-xs">当前活跃：{activeCount}/{maxActive}</p>
+                  <p className="text-center text-gray-600 text-xs">当前活跃：{activeCount}/{premiumSlotLimit}</p>
                 )}
               </div>
             </div>
